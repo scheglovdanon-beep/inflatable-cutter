@@ -125,8 +125,20 @@ def main():
     for s in lay["strips"]:
         for quad, c in strip_band_quads(s):
             dr.polygon([T(x, y) for x, y in quad], fill=tuple(c))
-        dr.line([T(x, y) for x, y in s["poly"]] + [T(*s["poly"][0])], fill=_palette(s["i"]), width=lw)
+        # толстая цветная обводка = ключ сборки (тот же цвет на дуге переда)
+        dr.line([T(x, y) for x, y in s["poly"]] + [T(*s["poly"][0])], fill=_palette(s["i"]), width=max(3, lw * 3))
         label(s["poly"], f"bok#{s['i']}")
+
+    # ----- КЛЮЧ СБОРКИ: дуга каждого сегмента на ПЕРЕДЕ тем же цветом, что боковина -----
+    gl = g["gusset_line"]
+    for s in g["segments"]:
+        a0, a1 = s["arc0"], s["arc1"]
+        npts = max(2, int(abs(a1 - a0) / 4))
+        arc = [pt2cv(*(np.asarray(gl.interpolate(a0 + (a1 - a0) * k / npts).coords[0]) / f_mm))
+               for k in range(npts + 1)]                              # мм gusset -> pt (pt2cv ждёт pt)
+        dr.line(arc, fill=_palette(s["i"]), width=max(3, lw * 3))      # сопрягаемое ребро переда
+        mx, my = arc[len(arc) // 2]
+        dr.text((mx + 3, my - 6), f"{s['i']}", fill=_palette(s["i"]))
 
     # ----- ДНИЩЕ + ножка — ЧЁРНЫЕ (цвет с 2D) + отверстие руки -----
     b = lay.get("base")
