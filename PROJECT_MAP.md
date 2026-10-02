@@ -39,7 +39,8 @@
 ### `sides.py` — перёд/зад/боковины/раскладка (ЦЕНТРАЛЬНЫЙ модуль)
 - Чтение тел: `front_drawings` (:81), `back_drawings` (:116) — левое/правое из 2 крупнейших тел; `_drop_background` (:63).
 - Фигуры: `get_front_figure` (:111), `get_back_figure` (:138), `front_target_height_mm` (:104), `contour_to_mm` (:271), `smooth_front` (:277).
-- Классификация заливок front/back: по ближайшему телу + буфер `front.buffer(2)`; флаг `front_all_details` расширяет буфер до `front_detail_reach_frac`·высота (0.03) — ловит оторванные детали (локоть, нажим шланга), НО не далёкие (брызги → ложная «рука»). cfg прокинут в контур (`get_front/back_figure`) и в рендереры текстуры.
+- Классификация заливок front/back: по ближайшему телу + буфер `front.buffer(2)`; флаг `front_all_details` → полный nearest-body (ВСЕ детали: локоть, шланг, брызги в контуре). cfg прокинут в контур (`get_front/back_figure`) и в рендереры текстуры.
+- Ложную «руку» (шланг/брызги — геометрия как у руки) отсекает ЦВЕТ: `build_layout` при кандидатов>expected_arms оставляет самые тёплые по `arm_fill_color` (R−B: кожа/рукав R≫B, вода/шланг B≫R).
 - Боковины: `build_gusset` (:310), `classify_sides` (:482), `build_strips` (:468), `_hourglass` (:503), `detect_protrusions` (:23).
 - Раскладка: `build_fitting_layout` (:531), `_pack_columns` (:492).
 - Отверстия: `place_arm_hole` (:184), `place_arm_hole_xy` (:233), `place_armpit_hole` (:249), `detect_neck` (:654).
