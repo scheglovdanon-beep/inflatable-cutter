@@ -9,6 +9,9 @@ thickness_mm: 300
 notch_interval_mm: 200
 mirror_back: false
 contour_gap_close_mm: 10.0
+# контур переда/зада: включать ВСЕ детали фигуры (классификация по ближайшему телу,
+# без строгого contains) — иначе мелкие оторванные заливки (локоть, брызги) выпадают из контура
+front_all_details: true
 fan_diameter_mm: 460
 main_width_mm: 350
 transition_piece_len_mm: 500

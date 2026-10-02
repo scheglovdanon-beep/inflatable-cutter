@@ -187,11 +187,11 @@ def main():
            '<rect width="100%" height="100%" fill="white"/>']
 
     # ПЕРЁД: текстура макета (вектор, кривые) — через аффин контур->панель (учитывает поворот)
-    svg.append(_design_group(front_drawings(page)[0], _tex_tf(contour_mm, lay["front"], f_mm), f_mm, "front"))
+    svg.append(_design_group(front_drawings(page, cfg)[0], _tex_tf(contour_mm, lay["front"], f_mm), f_mm, "front"))
     svg.append(_poly(list(lay["front"].exterior.coords), stroke="#000", sw=lw))      # линия шва переда
     bk0 = lay.get("back")
     if bk0:
-        svg.append(_design_group(back_drawings(page)[0], _tex_tf(bk0["src"], bk0["poly"], bk0["f_mm"]), bk0["f_mm"], "back"))
+        svg.append(_design_group(back_drawings(page, cfg)[0], _tex_tf(bk0["src"], bk0["poly"], bk0["f_mm"]), bk0["f_mm"], "back"))
         svg.append(_poly(list(bk0["poly"].exterior.coords), stroke="#000", sw=lw))
 
     # БОКОВИНЫ: акцентные цвета + контур

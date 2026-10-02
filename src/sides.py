@@ -90,13 +90,18 @@ def front_drawings(page, cfg=None):
     bodies = sorted(comps[:2], key=lambda g: g.centroid.x)
     front, back = bodies[0], bodies[1]
     from shapely.prepared import prep
-    fb = front.buffer(2); pf = prep(fb)                             # один буфер + prepared contains
     fcx, fcy = front.centroid.x, front.centroid.y
     bcx, bcy = back.centroid.x, back.centroid.y
+    # all_details: захватывать оторванные детали переда (локоть, нажим шланга) расширенным
+    # буфером reach_frac·высота_тела — но НЕ далёкие объекты (брызги), иначе ложная «рука».
+    all_details = (cfg or {}).get("front_all_details", False)
+    reach = (cfg or {}).get("front_detail_reach_frac", 0.03) * (front.bounds[3] - front.bounds[1])
+    region = prep(front.buffer(reach if all_details else 2))
     out = []
     for p, x in polys:
         cen = p.centroid
-        if ((cen.x - fcx) ** 2 + (cen.y - fcy) ** 2) <= ((cen.x - bcx) ** 2 + (cen.y - bcy) ** 2) and pf.contains(cen):
+        near_front = ((cen.x - fcx) ** 2 + (cen.y - fcy) ** 2) <= ((cen.x - bcx) ** 2 + (cen.y - bcy) ** 2)
+        if near_front and region.contains(cen):
             out.append(x)
     return out, R.height
 
@@ -109,7 +114,7 @@ def front_target_height_mm(cfg):
 
 
 def get_front_figure(page, cfg):
-    fr, page_H = front_drawings(page)
+    fr, page_H = front_drawings(page, cfg)
     return build_figure("front", fr, page_H, front_target_height_mm(cfg), cfg["contour_gap_close_mm"])
 
 
@@ -124,19 +129,22 @@ def back_drawings(page, cfg=None):
     bodies = sorted(comps[:2], key=lambda g: g.centroid.x)
     front, back = bodies[0], bodies[1]
     from shapely.prepared import prep
-    bb = back.buffer(2); pb = prep(bb)
     fcx, fcy = front.centroid.x, front.centroid.y
     bcx, bcy = back.centroid.x, back.centroid.y
+    all_details = (cfg or {}).get("front_all_details", False)       # все детали зада в контур (как у переда)
+    reach = (cfg or {}).get("front_detail_reach_frac", 0.03) * (back.bounds[3] - back.bounds[1])
+    region = prep(back.buffer(reach if all_details else 2))
     out = []
     for p, x in polys:
         cen = p.centroid
-        if ((cen.x - bcx) ** 2 + (cen.y - bcy) ** 2) <= ((cen.x - fcx) ** 2 + (cen.y - fcy) ** 2) and pb.contains(cen):
+        near_back = ((cen.x - bcx) ** 2 + (cen.y - bcy) ** 2) <= ((cen.x - fcx) ** 2 + (cen.y - fcy) ** 2)
+        if near_back and region.contains(cen):
             out.append(x)
     return out, R.height
 
 
 def get_back_figure(page, cfg):
-    br, page_H = back_drawings(page)
+    br, page_H = back_drawings(page, cfg)
     return build_figure("back", br, page_H, front_target_height_mm(cfg), cfg["contour_gap_close_mm"])
 
 

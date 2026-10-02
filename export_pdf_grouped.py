@@ -91,7 +91,7 @@ def main():
                        [f'<rect x="0" y="0" width="{W:.2f}" height="{H:.2f}" fill="none" stroke="#888" stroke-width="{lw}"/>']))
 
     # ПЕРЁД (текстура + контур + припуск) — аффин контур->панель (учитывает поворот)
-    pieces.append(("front", [_design_group(front_drawings(page)[0], _tex_tf(contour_mm, lay["front"], f_mm), f_mm, "front_tex"),
+    pieces.append(("front", [_design_group(front_drawings(page, cfg)[0], _tex_tf(contour_mm, lay["front"], f_mm), f_mm, "front_tex"),
                              _poly(list(lay["front"].exterior.coords), stroke="#000", sw=lw),
                              _poly(list(lay["front_seam"].exterior.coords), stroke="#dc0000", sw=lw)]))
 
@@ -99,7 +99,7 @@ def main():
     bk = lay.get("back")
     if bk:
         from sides import back_drawings
-        bbody = [_design_group(back_drawings(page)[0], _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["f_mm"], "back_tex"),
+        bbody = [_design_group(back_drawings(page, cfg)[0], _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["f_mm"], "back_tex"),
                  _poly(list(bk["poly"].exterior.coords), stroke="#000", sw=lw)]
         if bk.get("seam"):
             bbody.append(_poly(list(bk["seam"].exterior.coords), stroke="#dc0000", sw=lw))

@@ -87,7 +87,7 @@ def main():
     _ftf = _tex_tf(contour_mm, lay["front"], f_mm)                 # аффин контур->панель (учитывает поворот)
     pt2cv = lambda x, y: T(*_ftf(x, y))
     col = lambda c: tuple(int(255 * v) for v in c) if c else None
-    fr, _ = front_drawings(page)
+    fr, _ = front_drawings(page, cfg)
     for dd in fr:
         f = col(dd.get("fill")); s = col(dd.get("color"))
         for sub in _flat(dd):
@@ -108,7 +108,7 @@ def main():
     if bk:
         from sides import back_drawings
         bmap = _tex_tf(bk["src"], bk["poly"], bk["f_mm"])         # аффин контур зада->панель (поворот)
-        for dd in back_drawings(page)[0]:                          # текстура ЗАДНЕЙ фигуры макета
+        for dd in back_drawings(page, cfg)[0]:                     # текстура ЗАДНЕЙ фигуры макета
             f = col(dd.get("fill")); s = col(dd.get("color"))
             for sub in _flat(dd):
                 if len(sub) < 2:
