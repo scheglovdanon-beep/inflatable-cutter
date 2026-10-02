@@ -11,6 +11,11 @@ connectedComponents), **scikit-image** (skeletonize), **rectpack** (nesting в �
 **cairosvg** (SVG→PDF), **Pillow** (превью), **numpy/scipy**, **PyYAML** (конфиги).
 Установка: `python -m venv venv && venv/bin/pip install -r requirements.txt`.
 
+## Карта проекта
+**Перед ЛЮБОЙ правкой открывай `PROJECT_MAP.md`** — там шаги пайплайна `build_layout` →
+функции (файл:строка), модули, раннеры, флаги конфигов, «что где менять». Все лекала из
+2D-макета создаются ТОЛЬКО через единый вход `export_svg.build_layout`.
+
 ## Архитектура (слои)
 - `src/pieces.py` — `Figure`/`build_figure`/`build_contour`: union заливок → закрытие щелей
   (buffer±) → один контур; масштаб `s` к `target_height_mm`. `contour_pt` — контур в PT (y вниз).
