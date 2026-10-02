@@ -93,8 +93,15 @@ def build_layout(page, cfg):
         from arm import detect_armpits, cut_across_arm
         body_pt = fig.contour_pt                                 # силуэт переда в PT (фон уже убран)
         arms = detect_armpits(body_pt, cfg)
-        if "expected_arms" in cfg and len(arms) != cfg["expected_arms"]:
-            raise RuntimeError(f"ожидалось {cfg['expected_arms']} рук, найдено {len(arms)}")
+        exp = cfg.get("expected_arms")
+        if exp is not None and len(arms) > exp:                   # кандидатов больше, чем рук: оставить
+            from side_color import arm_fill_color                 # самые «рукоподобные» по цвету
+            def _warmth(a):                                       # кожа/рукав: R>>B (+); шланг/вода: B>>R (-)
+                c = arm_fill_color(page, np.asarray(a["poly"].exterior.coords, float))
+                return int(c[0]) - int(c[2])
+            arms = sorted(arms, key=_warmth, reverse=True)[:exp]
+        if exp is not None and len(arms) != exp:
+            raise RuntimeError(f"ожидалось {exp} рук, найдено {len(arms)}")
         for a in arms:
             arm_poly, body_pt = cut_across_arm(body_pt, a["f"], a["tip"], cfg, blade=a.get("blade"))
             if arm_poly is None:
