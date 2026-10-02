@@ -66,6 +66,7 @@
 ### `side_color.py` — цвета
 - `color_sides` (:154), `front_raster` (:71), `arm_fill_color` (:98, цвет рукава), `hand_fill_color` (цвет кисти → полоска-боковина, near-чёрный контур исключается), `base_fill_color`, `strip_band_quads`, `_accentize` (:41).
 - Полоска-боковина кисти (`src=None`) красится `hand_fill_color` во ВСЕХ рендерерах: `texture_view.py`, `export_svg.py`, `export_pdf_grouped.py`.
+- Цвет боковин: `_accentize` рубит малонасыщенное (<`accent_sat_min`) в белый; `_simplify_bands` (:17) сливает близкие оттенки; `_merge_small_bands` схлопывает скопления мелких зон (<`band_merge_small_frac` доли) в доминирующий цвет.
 
 ### Вспомогательные
 - `geometry.py` — `scale_to_height` (:22), `smooth` (:41), `validate` (:56).
