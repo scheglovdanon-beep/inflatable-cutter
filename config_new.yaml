@@ -14,6 +14,8 @@ contour_gap_close_mm: 10.0
 front_all_details: true
 fan_diameter_mm: 460
 main_width_mm: 350
+# сужение боковины 460->350 делать в ПЕРВОЙ части (seg0), а не во второй
+edge_taper_single: true
 transition_piece_len_mm: 500
 protrusion_narrow: true
 protrusion_open_r_mm: 60

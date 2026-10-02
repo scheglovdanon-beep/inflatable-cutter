@@ -440,8 +440,11 @@ def build_gusset(contour_mm, cfg):
 
     fan_w, main_w, tip_w = cfg["fan_diameter_mm"], cfg["main_width_mm"], cfg.get("tip_width_mm", 250)
     C = len(final)
+    # edge_taper_single: 460 только на крайнем срезе -> сужение 460->350 в ПЕРВОЙ части (seg0).
+    # Иначе (по умолчанию): 460 на двух крайних срезах -> сужение во ВТОРОЙ части.
+    edge = 0 if cfg.get("edge_taper_single", False) else 1
     def t_cut(k):
-        return fan_w if min(k, C - 1 - k) <= 1 else main_w
+        return fan_w if min(k, C - 1 - k) <= edge else main_w
     def prot_of(a, b):
         for a_s, a_e, a_c in prot_specs:
             if abs(a - a_s) < 0.5 and abs(b - a_e) < 0.5:
