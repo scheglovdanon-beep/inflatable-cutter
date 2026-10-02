@@ -114,6 +114,27 @@ def arm_fill_color(page, arm_pt):
     return max(areas, key=areas.get) if areas else (0, 0, 0)
 
 
+def hand_fill_color(page, hand_pt):
+    """Основной цвет КИСТИ по 2D: доминирующая (по площади bbox) заливка в габарите кисти.
+    Near-чёрные заливки (контур/силуэт кисти) исключаем — это обводка, а не «цвет кисти».
+    Бельё НЕ исключаем — для перчатки основной цвет белый. Возвращает (r,g,b).
+    Используется для полоски-боковины кисти (она одного цвета с кистью)."""
+    from collections import defaultdict
+    A = np.asarray(hand_pt, float)
+    bx0, by0, bx1, by1 = A[:, 0].min(), A[:, 1].min(), A[:, 0].max(), A[:, 1].max()
+    inbb = lambda r: r.x0 >= bx0 - 2 and r.x1 <= bx1 + 2 and r.y0 >= by0 - 2 and r.y1 <= by1 + 2
+    areas = defaultdict(float)
+    for dd in page.get_drawings():
+        f = dd.get("fill")
+        if f is None or not inbb(dd["rect"]):
+            continue
+        c = tuple(int(255 * v) for v in f)
+        if sum(c) < 60:                                              # near-чёрный = контур/силуэт, не цвет кисти
+            continue
+        r = dd["rect"]; areas[c] += r.width * r.height
+    return max(areas, key=areas.get) if areas else (245, 245, 245)
+
+
 def base_fill_color(page, front_drawings_fn):
     """Цвет ДНИЩА/ножки по 2D: доминирующий цвет низа фигуры (там обычно чёрная база/тень)."""
     arr, bx0, by0, Z, mg = front_raster(page, front_drawings_fn)

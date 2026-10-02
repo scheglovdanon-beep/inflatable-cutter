@@ -32,14 +32,14 @@ def _hand_tex(poly, src, arm_dds, f_mm, cid):
             + _design_group(arm_dds, lambda x, y: (ax @ [x, y, 1.0], ay @ [x, y, 1.0]), f_mm, "fist") + '</g>']
 
 
-def _piece_svg(p, kind, arm_dds, f_mm, lw, cid, arm_fill="none"):
+def _piece_svg(p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill="#f5f5f5"):
     """SVG-элементы одной детали руки/кисти: текстура/контур + припуск."""
     poly = p["poly"]; body = []
     if kind == "hand":
         if p.get("src") is not None:
             body += _hand_tex(poly, p["src"], arm_dds, f_mm, cid)
-        else:
-            body.append(_poly(list(poly.exterior.coords), fill="#f5f5f5", stroke="none", sw=0))
+        else:                                                        # полоска-боковина = цвет кисти
+            body.append(_poly(list(poly.exterior.coords), fill=hand_fill, stroke="none", sw=0))
         body.append(_poly(list(poly.exterior.coords), stroke="#009659", sw=lw))
     else:                                                            # база/плечо/предплечье — цвет руки (чёрный)
         body.append(_poly(list(poly.exterior.coords), fill=arm_fill, stroke="#960096", sw=lw))
@@ -78,6 +78,9 @@ def main():
     arm_fill = HEX(arm_fill_color(page, arm_pts if arm_pts is not None else get_arm_contour(page)[0])) \
         if (lay.get("arm_pieces") or lay.get("spare_arm")) else "none"
     base_fill = HEX(base_fill_color(page, front_drawings)) if lay.get("base") else "none"
+    from side_color import hand_fill_color
+    _hsrc = next((hp.get("src") for hp in lay.get("hand_pieces", []) if hp.get("src") is not None), None)
+    hand_fill = HEX(hand_fill_color(page, _hsrc)) if _hsrc is not None else "#f5f5f5"  # полоска-боковина кисти
     cc = [0]
     nextid = lambda: (cc.__setitem__(0, cc[0] + 1) or f"clip{cc[0]}")
 
@@ -122,7 +125,7 @@ def main():
     # КИСТЬ и РУКА — каждая деталь своей группой (текстура по bbox src этого куска)
     for hp in lay.get("hand_pieces", []):
         dds = _dds_for_src(hp["src"]) if hp.get("src") is not None else arm_dds
-        pieces.append((f"kist_{hp['name']}", _piece_svg(hp, "hand", dds, f_mm, lw, nextid())))
+        pieces.append((f"kist_{hp['name']}", _piece_svg(hp, "hand", dds, f_mm, lw, nextid(), hand_fill=hand_fill)))
     for apc in lay.get("arm_pieces", []):
         pieces.append((f"ruka_{apc.get('name','?')}", _piece_svg(apc, "arm", arm_dds, f_mm, lw, nextid(), arm_fill)))
 
@@ -131,7 +134,7 @@ def main():
     if spare:
         body = []
         for p in spare:
-            body += _piece_svg(p, p["kind"], arm_dds, f_mm, lw, nextid(), arm_fill)
+            body += _piece_svg(p, p["kind"], arm_dds, f_mm, lw, nextid(), arm_fill, hand_fill)
         pieces.append(("zapasnaya_ruka", body))
 
     # ДНИЩЕ (+ отверстие) и НОЖКА

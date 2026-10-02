@@ -64,7 +64,8 @@
 - `nest_roll` (:135, рулон), `repack_layout` (:176, без наложений), `_units` (:11).
 
 ### `side_color.py` — цвета
-- `color_sides` (:154), `front_raster` (:71), `arm_fill_color` (:98), `base_fill_color` (:117), `strip_band_quads` (:218), `_accentize` (:41).
+- `color_sides` (:154), `front_raster` (:71), `arm_fill_color` (:98, цвет рукава), `hand_fill_color` (цвет кисти → полоска-боковина, near-чёрный контур исключается), `base_fill_color`, `strip_band_quads`, `_accentize` (:41).
+- Полоска-боковина кисти (`src=None`) красится `hand_fill_color` во ВСЕХ рендерерах: `texture_view.py`, `export_svg.py`, `export_pdf_grouped.py`.
 
 ### Вспомогательные
 - `geometry.py` — `scale_to_height` (:22), `smooth` (:41), `validate` (:56).

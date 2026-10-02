@@ -211,6 +211,9 @@ def main():
         x0, y0, x1, y1 = s[:, 0].min(), s[:, 1].min(), s[:, 0].max(), s[:, 1].max()
         return [dd for dd in all_dds if (dd["rect"].x0 >= x0 - 2 and dd["rect"].x1 <= x1 + 2
                                          and dd["rect"].y0 >= y0 - 2 and dd["rect"].y1 <= y1 + 2)]
+    from side_color import hand_fill_color
+    _hsrc = next((hp.get("src") for hp in lay.get("hand_pieces", []) if hp.get("src") is not None), None)
+    hand_hex = HEX(hand_fill_color(page, _hsrc)) if _hsrc is not None else "#f5f5f5"  # полоска-боковина = цвет кисти
     svg.append('<g id="hand">')
     for hpiece in lay.get("hand_pieces", []):
         poly = hpiece["poly"]
@@ -226,7 +229,7 @@ def main():
                 svg.append(_design_group(arm_dds, lambda x, y: (ax @ [x, y, 1.0], ay @ [x, y, 1.0]), f_mm, "fist"))
                 svg.append("</g>")
         else:
-            svg.append(_poly(list(poly.exterior.coords), fill="#f5f5f5", stroke="none", sw=0))
+            svg.append(_poly(list(poly.exterior.coords), fill=hand_hex, stroke="none", sw=0))
         svg.append(_poly(list(poly.exterior.coords), stroke="#009659", sw=lw))
     svg.append("</g>")
 

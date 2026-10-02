@@ -163,6 +163,10 @@ def main():
         x0, y0, x1, y1 = s[:, 0].min(), s[:, 1].min(), s[:, 0].max(), s[:, 1].max()
         return [dd for dd in all_dds if (dd["rect"].x0 >= x0 - 2 and dd["rect"].x1 <= x1 + 2
                                          and dd["rect"].y0 >= y0 - 2 and dd["rect"].y1 <= y1 + 2)]
+    from side_color import hand_fill_color
+    hand_src = next((hp.get("src") for hp in lay.get("hand_pieces", []) if hp.get("src") is not None), None)
+    hand_col = hand_fill_color(page, hand_src) if hand_src is not None else (245, 245, 245)  # цвет полоски-боковины кисти
+
     arm_dds = []
     if arm_pts is not None:
         A = arm_pts; abx0, aby0, abx1, aby1 = A[:, 0].min(), A[:, 1].min(), A[:, 0].max(), A[:, 1].max()
@@ -200,8 +204,8 @@ def main():
                         if st is not None:
                             ld.line(pts + ([pts[0]] if len(pts) >= 3 else []), fill=st, width=max(1, int(dd.get("width", .5) * f_mm * sc)))
                 im.paste(layer, (0, 0), mask)
-        else:                                                       # боковина — белая
-            im.paste(Image.new("RGB", im.size, (245, 245, 245)), (0, 0), mask)
+        else:                                                       # боковина-полоска — цвет кисти
+            im.paste(Image.new("RGB", im.size, hand_col), (0, 0), mask)
         dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 150, 90), width=lw)
 
     for hpiece in lay.get("hand_pieces", []):
