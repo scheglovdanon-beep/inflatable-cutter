@@ -106,3 +106,52 @@ def test_each_edge_equals_arc_and_sum_perimeter():
         assert abs(s["edge_len"] - s["edge"]) < 1.0                                 # ребро = длине дуги
     total = sum(s["edge_len"] for s in lay["strips"])
     assert abs(total - g["gusset_len"]) < len(lay["strips"])                        # Σ рёбер = периметр-днище
+
+def test_neck_detected():
+    import pymupdf
+    from sides import detect_neck
+    page = pymupdf.open(PDF)[0]
+    C = contour_to_mm(get_front_figure(page, CFG))
+    g = build_gusset(C, CFG)
+    neck = detect_neck(C, g, CFG)
+    assert neck["found"]                                       # шея есть на примере
+    assert neck["seg_left"] is not None and neck["seg_right"] is not None
+    assert neck["seg_left"] != neck["seg_right"]               # разные детали Л/П
+    assert neck["drop"] >= CFG["neck_min_drop"]
+
+def test_arm_hole_placed():
+    import pymupdf
+    from sides import classify_sides, build_fitting_layout, detect_neck, detect_arm_side, place_arm_hole
+    page = pymupdf.open(PDF)[0]
+    C = contour_to_mm(get_front_figure(page, CFG)); g = build_gusset(C, CFG); classify_sides(g, C)
+    lay = build_fitting_layout(C, g)
+    neck = detect_neck(C, g, CFG); side = detect_arm_side(page, CFG)
+    place_arm_hole(lay, neck, side, CFG)
+    ah = lay["arm_hole"]
+    assert abs(ah["r"]*2 - CFG["arm_hole_diameter_mm"]) < 1                 # Ø250
+    assert ah["piece"] == (neck["seg_left"] if side == "left" else neck["seg_right"])
+    s = next(x for x in lay["strips"] if x["i"] == ah["piece"])
+    xs=[p[0] for p in s["poly"]]; ys=[p[1] for p in s["poly"]]
+    assert abs(ah["cx"] - (min(xs)+max(xs))/2) < 1                          # по центру ширины
+    assert abs((ah["cy"]-ah["r"]) - (min(ys)+CFG["arm_hole_top_margin_mm"])) < 1  # верх = margin от края
+    assert min(xs) <= ah["cx"]-ah["r"] and ah["cx"]+ah["r"] <= max(xs)      # круг внутри детали
+
+def test_arm_pieces_built():
+    import math
+    from arm import build_arm
+    ps = build_arm(CFG)
+    assert {p["name"] for p in ps} == {"baza", "plecho", "predplechie"}      # 3 детали, без кисти
+    base = next(p for p in ps if p["name"] == "baza")
+    assert abs(base["w"] - math.pi * CFG["arm_hole_diameter_mm"]) < 10        # база = π·D_hole
+    plecho = next(p for p in ps if p["name"] == "plecho")
+    assert plecho["area"] > base["area"]                                     # плечо крупнее базы
+
+def test_arm_edges_mate():
+    import math
+    from arm import build_arm
+    ps = {p["name"]: p for p in build_arm(CFG)}
+    base, plecho, pred = ps["baza"], ps["plecho"], ps["predplechie"]
+    circ = math.pi * CFG["arm_hole_diameter_mm"]
+    assert abs(base["w"] - circ) < 8                              # база.ширина = π·D (отверстие)
+    assert abs(plecho["edge_bottom"] - base["w"]) < 8            # плечо.низ = база.ширина
+    assert abs(plecho["edge_top"] - pred["edge_bottom"]) < 8     # плечо.верх = предплечье.низ

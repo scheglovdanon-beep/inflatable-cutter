@@ -1,35 +1,36 @@
-# Параметры раскроя (не хардкодить в коде)
-target_height_mm: 2700        # целевая высота фигуры
-seam_allowance_mm: 10         # припуск на шов
-thickness_mm: 300             # толщина фигуры = ширина боковой полоски без припусков
-fabric_roll_width_mm: null    # ширина рулона; null = пока НЕ выкладываем на печать
-notch_interval_mm: 200        # шаг насечек
-mirror_back: true             # задняя панель — зеркальная копия передней
-
-contour_gap_close_mm: 10.0     # закрытие щелей контура в ФИНАЛЬНЫХ мм (после масштаба к 2700)
-
-# боковые части (гассет) — толщина по частям от вентилятора
-fan_diameter_mm: 460           # первая часть у вентилятора (с обоих концов) = 460
-main_width_mm: 350             # основной боковой размер (корпус+голова), для 2700 мм
-transition_piece_len_mm: 500   # высота 2-й нижней детали (переход 460->350), одинаково Л/П
-
-# сужение на выступах (антенна и т.п.) — 350 -> tip к центру выпуклости, с обеих сторон
-protrusion_narrow: true        # включить сужение на выступах
-protrusion_open_r_mm: 60       # радиус opening (ловит выступы тоньше 120 мм, для 2700)
-protrusion_reach_ratio: 0.6    # порог reach/R: >=0.6 выступ, ~0.41 угол панели
-protrusion_min_area_mm2: 150   # отсев мусора
-tip_width_mm: 250              # толщина на кончике/центре выступа (для 2700)
-protrusion_min_piece_mm: 500   # мин. высота детали с талией (50 см); короче -> слить с соседями
-
-# днище (основание) + ножка
-base_diameter_mm: 460          # Ø круга-днища (по умолчанию = вентилятору)
-leg_height_mm: 150             # высота ножки (прямоугольник), ширина = длина окружности круга
-side_max_len_mm: 1500          # макс. длина одной полосы (длиннее — дорезаем)
-side_min_len_mm: 200           # мин. длина полосы (короче — сливаем с соседней)
-corner_angle_deg: 35           # порог «угла» для точки разреза
-corner_simplify_mm: 4.0        # упрощение кривой перед поиском углов (устойчивость)
-bottom_detect_frac: 0.03       # нижняя полоса для поиска двух нижних углов (доля высоты)
-
-# служебное (под конкретный вход)
-figure_side: left             # (этап 1) какую фигуру считать передом
-smooth_tol_mm: 1.0            # (этап 1) допуск сглаживания контура
+target_height_mm: 2700
+seam_allowance_mm: 10
+line_width_mm: 0.2
+thickness_mm: 300
+fabric_roll_width_mm: null
+notch_interval_mm: 200
+mirror_back: true
+contour_gap_close_mm: 10.0
+fan_diameter_mm: 460
+main_width_mm: 350
+transition_piece_len_mm: 500
+protrusion_narrow: true
+protrusion_open_r_mm: 60
+protrusion_reach_ratio: 0.6
+protrusion_min_area_mm2: 150
+tip_width_mm: 250
+protrusion_min_piece_mm: 500
+neck_search_top_frac: 0.5
+neck_smooth_mm: 40
+neck_min_drop: 0.12
+arm_side: auto
+arm_hole_diameter_mm: 250
+arm_hole_top_margin_mm: 20
+arm_template_pdf: examples/arm_template.pdf
+arm_template_hole_mm: 250
+arm_base_height_mm: 40
+base_diameter_mm: 460
+leg_height_mm: 150
+side_max_len_mm: 1500
+side_min_len_mm: 200
+corner_angle_deg: 35
+corner_simplify_mm: 4.0
+bottom_detect_frac: 0.03
+figure_side: left
+smooth_tol_mm: 1.0
+front_smooth_mm: 0

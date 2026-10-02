@@ -181,6 +181,12 @@ def save_fitting_svg(layout, path):
         p.append(f'<polygon points="{poly}" fill="none" stroke="#000" stroke-width="2"/>')
         p.append(f'<circle cx="{fx:.2f}" cy="{fy:.2f}" r="{b["fan_d"]/2:.2f}" fill="none" stroke="#e00000" stroke-width="3"/>')
         p.append(f'<rect x="{lx:.2f}" y="{ly:.2f}" width="{lw:.2f}" height="{lh:.2f}" fill="none" stroke="#000" stroke-width="2"/>')
+    ah = layout.get("arm_hole")
+    if ah:
+        p.append(f'<circle cx="{ah["cx"]:.2f}" cy="{ah["cy"]:.2f}" r="{ah["r"]:.2f}" fill="none" stroke="#e00000" stroke-width="3"/>')
+    for ap in layout.get("arm_pieces", []):
+        pts = " ".join(f"{x:.2f},{y:.2f}" for x, y in ap["poly"].exterior.coords)
+        p.append(f'<polygon points="{pts}" fill="none" stroke="#b000b0" stroke-width="2"/>')
     p.append('</svg>')
     open(path, "w", encoding="utf-8").write("\n".join(p))
 

@@ -3,8 +3,16 @@
 и дробим её на полосы. Всё в финальных мм. Пока без припуска и раскраски.
 """
 import math
+import colorsys
 import numpy as np
 import cv2
+
+
+def _palette(i, n=14):
+    """Различимый цвет по индексу детали (одинаковый для дуги контура и полосы)."""
+    h = (i * 0.61803398875) % 1.0                      # золотое сечение — цвета не повторяются
+    r, g, b = colorsys.hsv_to_rgb(h, 0.85, 0.85)
+    return (int(r * 255), int(g * 255), int(b * 255))
 from shapely.geometry import LineString, Point, MultiPolygon
 from shapely.ops import unary_union
 from shapely import affinity
@@ -52,19 +60,44 @@ def detect_protrusions(contour_mm, gusset_pts, cfg):
 PT2MM = 25.4 / 72.0
 
 
-def front_drawings(page):
+def _drop_background(drs, R, cfg=None):
+    """Убрать заливки-фон: (1) bbox ≥ bg_page_frac по ширине И высоте страницы;
+    (2) страховка — заливка с bbox ≥ bg_soft_frac по ПЛОЩАДИ страницы. Универсально,
+    заменяет дублированный фильтр фона в 4 функциях детекта."""
+    pf = (cfg or {}).get("bg_page_frac", 0.95)
+    sf = (cfg or {}).get("bg_soft_frac", 0.80)
+    page_area = R.width * R.height
+    out = []
+    for x in drs:
+        rc = x["rect"]
+        if rc.width > pf * R.width and rc.height > pf * R.height:
+            continue
+        if (rc.width * rc.height) > sf * page_area and rc.width > 0.6 * R.width:
+            continue
+        out.append(x)
+    return out
+
+
+def front_drawings(page, cfg=None):
     """Перёд = левое из 2 крупнейших связных тел (руки/мусор отсекаются)."""
     R = page.rect
     drs = [x for x in page.get_drawings() if x.get("fill") is not None]
-    drs = [x for x in drs if not (x["rect"].width > 0.95 * R.width and x["rect"].height > 0.95 * R.height)]
+    drs = _drop_background(drs, R, cfg)
     polys = [(_poly_of(x), x) for x in drs]
     polys = [(p, x) for p, x in polys if p]
     u = unary_union([p for p, _ in polys])
     comps = sorted((u.geoms if isinstance(u, MultiPolygon) else [u]), key=lambda g: -g.area)
     bodies = sorted(comps[:2], key=lambda g: g.centroid.x)
     front, back = bodies[0], bodies[1]
-    out = [x for p, x in polys
-           if p.centroid.distance(front) <= p.centroid.distance(back) and front.buffer(2).contains(p.centroid)]
+    from shapely.prepared import prep
+    fb = front.buffer(2); pf = prep(fb)                             # один буфер + prepared contains
+    fcx, fcy = front.centroid.x, front.centroid.y
+    bcx, bcy = back.centroid.x, back.centroid.y
+    out = []
+    for p, x in polys:
+        cen = p.centroid
+        if ((cen.x - fcx) ** 2 + (cen.y - fcy) ** 2) <= ((cen.x - bcx) ** 2 + (cen.y - bcy) ** 2) and pf.contains(cen):
+            out.append(x)
     return out, R.height
 
 
@@ -73,10 +106,181 @@ def get_front_figure(page, cfg):
     return build_figure("front", fr, page_H, cfg["target_height_mm"], cfg["contour_gap_close_mm"])
 
 
+def back_drawings(page, cfg=None):
+    """Зад = ПРАВОЕ из 2 крупнейших связных тел (уже отзеркаленная задняя фигура макета)."""
+    R = page.rect
+    drs = [x for x in page.get_drawings() if x.get("fill") is not None]
+    drs = _drop_background(drs, R, cfg)
+    polys = [(p, x) for p, x in ((_poly_of(x), x) for x in drs) if p]
+    u = unary_union([p for p, _ in polys])
+    comps = sorted((u.geoms if isinstance(u, MultiPolygon) else [u]), key=lambda g: -g.area)
+    bodies = sorted(comps[:2], key=lambda g: g.centroid.x)
+    front, back = bodies[0], bodies[1]
+    from shapely.prepared import prep
+    bb = back.buffer(2); pb = prep(bb)
+    fcx, fcy = front.centroid.x, front.centroid.y
+    bcx, bcy = back.centroid.x, back.centroid.y
+    out = []
+    for p, x in polys:
+        cen = p.centroid
+        if ((cen.x - bcx) ** 2 + (cen.y - bcy) ** 2) <= ((cen.x - fcx) ** 2 + (cen.y - fcy) ** 2) and pb.contains(cen):
+            out.append(x)
+    return out, R.height
+
+
+def get_back_figure(page, cfg):
+    br, page_H = back_drawings(page)
+    return build_figure("back", br, page_H, cfg["target_height_mm"], cfg["contour_gap_close_mm"])
+
+
+def detect_arm_side(page, cfg):
+    """Сторона машущей руки (универсально): деталь-рука привязана к ближайшему телу;
+    сторона = слева/справа от центра переда. Или из cfg['arm_side']."""
+    s = cfg.get("arm_side", "auto")
+    if s in ("left", "right"):
+        return s
+    R = page.rect
+    drs = [x for x in page.get_drawings() if x.get("fill") is not None]
+    drs = _drop_background(drs, R, cfg)
+    polys = [p for p in (_poly_of(x) for x in drs) if p]
+    comps = unary_union(polys)
+    comps = sorted((comps.geoms if isinstance(comps, MultiPolygon) else [comps]), key=lambda gg: -gg.area)
+    if len(comps) < 3:
+        return "left"
+    front = sorted(comps[:2], key=lambda gg: gg.centroid.x)[0]
+    arms = [gg for gg in comps[2:] if gg.area > 0.01 * front.area]
+    if not arms:
+        return "left"
+    arm = min(arms, key=lambda a: abs(a.centroid.x - front.centroid.x))   # рука переда = ближайшая
+    return "left" if arm.centroid.x < front.centroid.x else "right"
+
+
+def get_arm_contour(page, cfg=None):
+    """Контур машущей руки переда (pt) + X центра переда (pt). Рука = компонент,
+    ближайший к переду среди не-тел; перёд = левое из двух крупнейших тел."""
+    R = page.rect
+    drs = [x for x in page.get_drawings() if x.get("fill") is not None]
+    drs = _drop_background(drs, R, cfg)
+    polys = [(p, x) for p, x in ((_poly_of(x), x) for x in drs) if p]
+    u = unary_union([p for p, _ in polys])
+    comps = sorted((u.geoms if isinstance(u, MultiPolygon) else [u]), key=lambda g: -g.area)
+    front = sorted(comps[:2], key=lambda g: g.centroid.x)[0]
+    arms = [g for g in comps[2:] if g.area > 0.01 * front.area]
+    arm = min(arms, key=lambda a: abs(a.centroid.x - front.centroid.x))      # рука переда
+    members = [p for p, _ in polys if arm.buffer(2).contains(p.centroid)]
+    ring = unary_union(members)
+    if isinstance(ring, MultiPolygon):
+        ring = max(ring.geoms, key=lambda g: g.area)
+    return np.array(ring.exterior.coords[:-1]), float(front.centroid.x)
+
+
+def place_arm_hole(layout, neck, arm_side, cfg):
+    """Круг-отверстие под руку на боковой детали со стороны руки: по центру ширины,
+    у верха детали (верх круга = margin от верхней кромки). Универсально (формула)."""
+    if not neck.get("found"):
+        return
+    piece_i = neck["seg_left"] if arm_side == "left" else neck["seg_right"]
+    s = next((x for x in layout["strips"] if x["i"] == piece_i), None)
+    if s is None:
+        return
+    xs = [p[0] for p in s["poly"]]; ys = [p[1] for p in s["poly"]]
+    R = cfg.get("arm_hole_diameter_mm", 250) / 2.0
+    margin = cfg.get("arm_hole_top_margin_mm", 20)
+    layout["arm_hole"] = {"cx": (min(xs) + max(xs)) / 2.0, "cy": min(ys) + margin + R,
+                          "r": R, "piece": piece_i, "side": arm_side}
+
+
+def add_back_panel(layout, contour_mm, fig, cfg, page, gap=120.0):
+    """Задняя основная сторона = РЕАЛЬНАЯ задняя фигура макета (правая, уже отзеркаленная) —
+    её контур (сглаженный, к 2700) + её текстура. Ставится чистой полосой ниже всей раскладки.
+    Вызывать ПОСЛЕ размещения руки, ДО запаски."""
+    if not cfg.get("make_back"):
+        return
+    bfig = get_back_figure(page, cfg)
+    bcm = smooth_front(contour_to_mm(bfig), cfg)                     # контур зада в мм (как у переда)
+    gmax = layout["front"].bounds[3]
+    for s in layout.get("strips", []):
+        gmax = max(gmax, max(y for _, y in s["poly"]))
+    for key in ("arm_pieces", "hand_pieces"):
+        for p in layout.get(key, []):
+            gmax = max(gmax, p["poly"].bounds[3])
+    b = layout.get("base")
+    if b:
+        gmax = max(gmax, b["dnishe"].bounds[3], b["leg"][1] + b["leg"][3])
+    by = gmax + gap
+    bx = layout["front"].bounds[0]
+    bdx = bx - bcm.bounds[0]; bdy = by - bcm.bounds[1]
+    back = affinity.translate(bcm, bdx, bdy)
+    layout["back"] = {"poly": back, "f_mm": bfig.s * PT2MM, "bdx": bdx, "bdy": bdy,
+                      "src": affinity.translate(bcm, 0, 0)}         # исходный контур (для solve-affine текстуры)
+    layout["sheet_h"] = max(layout["sheet_h"], by + (bcm.bounds[3] - bcm.bounds[1]) + gap)
+
+
+def back_texmap(back):
+    """Маппинг точки задней ФИГУРЫ макета (pt) -> координаты задней панели (мм). Без зеркала —
+    задняя фигура уже отзеркалена в макете."""
+    fm, bdx, bdy = back["f_mm"], back["bdx"], back["bdy"]
+    return lambda x, y: (x * fm + bdx, y * fm + bdy)
+
+
+def place_arm_hole_xy(layout, g, contour_mm, shoulder_xy, cfg):
+    """Отверстие Ø arm_hole_diameter_mm на боковине, ближайшей к точке плеча shoulder_xy
+    (для фигур без шеи). По центру ширины детали, у верхнего края."""
+    from shapely.geometry import Point
+    line = g["gusset_line"]
+    arc = line.project(Point(shoulder_xy))                          # позиция плеча вдоль гассета
+    s = next((x for x in layout["strips"] if x["arc0"] <= arc <= x["arc1"]), None)
+    if s is None:
+        return
+    xs = [p[0] for p in s["poly"]]; ys = [p[1] for p in s["poly"]]
+    R = cfg.get("arm_hole_diameter_mm", 250) / 2.0
+    margin = cfg.get("arm_hole_top_margin_mm", 20)
+    layout["arm_hole"] = {"cx": (min(xs) + max(xs)) / 2.0, "cy": min(ys) + margin + R,
+                          "r": R, "piece": s["i"], "side": s.get("side", "left")}
+
+
+def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg):
+    """Ø arm_hole_diameter_mm на боковине, ближайшей к точке подмышки armpit_pt (в PT).
+    Пишет в СПИСОК arm_holes (не перезатирает при нескольких руках). Боковина — по индексу
+    сегмента гассета (seg['i']), как place_arm_hole."""
+    from shapely.geometry import Point
+    f_mm = fig.s * PT2MM
+    ax = armpit_pt[0] * f_mm; ay = armpit_pt[1] * f_mm              # подмышка в мм (как contour_mm)
+    arc = g["gusset_line"].project(Point(ax, ay))                  # позиция вдоль гассета
+    piece_i = next((seg["i"] for seg in g["segments"]
+                    if seg["arc0"] <= arc <= seg["arc1"]), None)
+    if piece_i is None:
+        return
+    s = next((x for x in layout["strips"] if x["i"] == piece_i), None)
+    if s is None:
+        return
+    xs = [p[0] for p in s["poly"]]; ys = [p[1] for p in s["poly"]]
+    R = cfg.get("arm_hole_diameter_mm", 250) / 2.0
+    m = cfg.get("arm_hole_top_margin_mm", 20)
+    layout.setdefault("arm_holes", []).append(
+        {"cx": (min(xs) + max(xs)) / 2.0, "cy": min(ys) + m + R, "r": R, "piece": piece_i})
+
+
 def contour_to_mm(fig):
     """Контур переда в финальных мм (масштаб фигуры применён)."""
     f = fig.s * PT2MM
     return affinity.scale(fig.contour_pt, f, f, origin=(0, 0))
+
+
+def smooth_front(contour_mm, cfg):
+    """Сгладить передний контур ТОЛЬКО в зигзагообразных частях (волосы, мелкие выступы,
+    бугры), не обрезая макет и не трогая крупные плавные части.
+    Логика: морфологическое ЗАМЫКАНИЕ (closing) радиусом front_smooth_mm — заполняет впадины
+    между выступами плавной внешней дугой; closing расширяющая, поэтому ВЕСЬ исходный контур
+    (и весь макет) гарантированно остаётся внутри. Крупные вогнутости (> ~2r, талия и т.п.)
+    и выпуклости сохраняются как обычная обводка. 0 = без сглаживания."""
+    r = cfg.get("front_smooth_mm", 0)
+    if not r or r <= 0:
+        return contour_mm
+    p = contour_mm.buffer(r, join_style=1).buffer(-r, join_style=1)   # closing (round): впадины -> плавная дуга
+    if p.geom_type == "MultiPolygon":
+        p = max(p.geoms, key=lambda g: g.area)
+    return p.buffer(0)
 
 
 def _seglen(pts):
@@ -393,9 +597,13 @@ def render_fitting(layout, out_png, target_h=1300, margin=40):
     im = Image.new("RGB", (W, H), (255, 255, 255)); dr = ImageDraw.Draw(im)
     # перёд — контур
     dr.line([T(x, y) for x, y in layout["front"].exterior.coords], fill=(120, 120, 120), width=2)
-    # полосы — трапеции
+    # полосы — трапеции; если есть bands (раскраска под перед) — заливаем зоны реальным цветом
     for s in layout["strips"]:
-        col = (200, 0, 0) if s["side"] == "left" else (0, 0, 210)
+        col = _palette(s["i"])
+        if s.get("bands"):
+            from side_color import strip_band_quads
+            for quad, c in strip_band_quads(s):
+                dr.polygon([T(x, y) for x, y in quad], fill=tuple(c))
         dr.polygon([T(x, y) for x, y in s["poly"]], outline=col)
         px, py = T(s["poly"][0][0], s["poly"][0][1])
         lbl = f'#{s["i"]} L{s["edge"]:.0f} w{s["t_top"]:.0f}/{s["t_bot"]:.0f}'
@@ -413,6 +621,135 @@ def render_fitting(layout, out_png, target_h=1300, margin=40):
         lx, ly, lw, lh = b["leg"]
         dr.rectangle([T(lx, ly), T(lx + lw, ly + lh)], outline=(0, 0, 0), width=2)
         dr.text(T(lx, ly - 14), f'nozhka {lw:.0f}x{lh:.0f}', fill=(0, 0, 0))
+    ah = layout.get("arm_hole")                                     # отверстие под руку (красное)
+    if ah:
+        dr.ellipse([T(ah["cx"] - ah["r"], ah["cy"] - ah["r"]), T(ah["cx"] + ah["r"], ah["cy"] + ah["r"])],
+                   outline=(220, 0, 0), width=3)
+        dr.text(T(ah["cx"] - ah["r"], ah["cy"] - ah["r"] - 14), f'ruka D{ah["r"] * 2:.0f} (#{ah["piece"]})', fill=(200, 0, 0))
+    for ap in layout.get("arm_pieces", []):                         # детали руки (база/плечо/предплечье)
+        dr.polygon([T(x, y) for x, y in ap["poly"].exterior.coords], outline=(170, 0, 170))
+        bb = ap["poly"].bounds
+        dr.text(T(bb[0], bb[1] - 14), f'{ap["name"]} {ap["w"]:.0f}x{ap["h"]:.0f}', fill=(150, 0, 150))
+    for hp in layout.get("hand_pieces", []):                        # детали кисти (лево/боковина/право)
+        dr.polygon([T(x, y) for x, y in hp["poly"].exterior.coords], outline=(0, 150, 90))
+        bb = hp["poly"].bounds
+        dr.text(T(bb[0], bb[1] - 14), f'kist:{hp["name"]} {hp["w"]:.0f}x{hp["h"]:.0f}', fill=(0, 130, 70))
+    if any("seam" in s for s in layout.get("strips", [])) or "front_seam" in layout:  # припуск (сплошной)
+        from seam import seam_rings
+        lw = max(1, round(0.2 * sc))
+        for ring in seam_rings(layout):
+            dr.line([T(x, y) for x, y in ring], fill=(220, 0, 0), width=lw)
+    im.save(out_png)
+    return W, H
+
+
+# ---------- детект перехода корпус->голова (шея) ----------
+def detect_neck(contour_mm, g, cfg):
+    """Переход корпус->голова, ОТДЕЛЬНО слева и справа (каждая точка на своём изгибе-пинче,
+    не на общей горизонтали). Плюс боковые детали, переходящие корпус->голова.
+    Возвращает {found, left, right, seg_left, seg_right, drop}."""
+    from shapely.geometry import Point
+    top_frac = cfg.get("neck_search_top_frac", 0.5)
+    smooth = int(cfg.get("neck_smooth_mm", 40)) | 1
+    min_drop = cfg.get("neck_min_drop", 0.12)
+    x0, y0, x1, y1 = contour_mm.bounds
+    W, H = int(x1 - x0) + 20, int(y1 - y0) + 20
+    ring = np.array([[x - x0 + 10, y - y0 + 10] for x, y in contour_mm.exterior.coords], np.int32)
+    mask = np.zeros((H, W), np.uint8); cv2.fillPoly(mask, [ring], 1)
+    ys = np.where(mask.any(1))[0]; yt, yb = ys.min(), ys.max(); fh = yb - yt
+    rows = [np.where(mask[y] > 0)[0] for y in range(H)]
+    w = np.array([(r.max() - r.min()) if len(r) else 0 for r in rows], float)
+    ws = np.convolve(w, np.ones(smooth) / smooth, mode="same")
+    y_end = int(yt + top_frac * fh)
+    y_head = yt + int(np.argmax(ws[yt:y_end]))
+    y_wmin = y_head + int(np.argmin(ws[y_head:y_end]))
+    drop = (ws[y_head] - ws[y_wmin]) / ws[y_head] if ws[y_head] > 0 else 0.0
+    if not (drop >= min_drop and y_wmin > y_head + 5):
+        return {"found": False}
+    y_sh = y_wmin + int(np.argmax(ws[y_wmin:y_end])) if y_wmin < y_end - 1 else y_end
+    lo, hi = y_head, max(y_sh, y_head + 10)
+    lx = np.array([rows[y].min() if len(rows[y]) else 1e9 for y in range(H)])
+    rx = np.array([rows[y].max() if len(rows[y]) else -1e9 for y in range(H)])
+    yL = lo + int(np.argmax(lx[lo:hi]))                 # левый край дальше вправо = пинч слева
+    yR = lo + int(np.argmin(rx[lo:hi]))                 # правый край дальше влево = пинч справа
+    left = (float(lx[yL] - 10 + x0), float(yL - 10 + y0))
+    right = (float(rx[yR] - 10 + x0), float(yR - 10 + y0))
+
+    line = g["gusset_line"]
+    def body_piece(pt):
+        """Нижняя (корпусная) деталь под шеей = сосед детали-с-точкой с меньшим y_norm."""
+        a = line.project(Point(*pt))
+        ci = next((s["i"] for s in g["segments"] if s["arc0"] <= a <= s["arc1"]), None)
+        if ci is None:
+            return None
+        neigh = [s for s in g["segments"] if s["i"] in (ci - 1, ci + 1)]
+        return min(neigh, key=lambda s: s["y_norm"])["i"] if neigh else ci
+    return {"found": True, "left": left, "right": right, "drop": float(drop),
+            "seg_left": body_piece(left), "seg_right": body_piece(right)}
+
+
+def render_neck(contour_mm, g, neck, layout, out_png, target_h=1300, margin=40, gap=120):
+    from PIL import Image, ImageDraw
+    x0, y0, x1, y1 = contour_mm.bounds
+    sc = target_h / (y1 - y0)
+    Cw = (x1 - x0) * sc
+    strips = []
+    if neck.get("found") and layout:
+        want = {neck["seg_left"], neck["seg_right"]}
+        strips = [s for s in layout["strips"] if s["i"] in want]
+    col_w = (max([(max(p[0] for p in s["poly"]) - min(p[0] for p in s["poly"])) for s in strips] + [0])) * sc
+    W = int(Cw + (gap + col_w if strips else 0)) + 2 * margin
+    H = int((y1 - y0) * sc) + 2 * margin
+    def T(x, y): return (margin + (x - x0) * sc, margin + (y - y0) * sc)
+    im = Image.new("RGB", (W, H), (255, 255, 255)); dr = ImageDraw.Draw(im)
+    dr.line([T(x, y) for x, y in contour_mm.exterior.coords], fill=(210, 210, 210), width=2)
+    if neck.get("found"):
+        line = g["gusset_line"]
+        for si in (neck["seg_left"], neck["seg_right"]):                 # дуги нижних деталей
+            s = next((x for x in g["segments"] if x["i"] == si), None)
+            if not s:
+                continue
+            L = s["arc1"] - s["arc0"]; nn = max(8, int(L / 15))
+            pts = [line.interpolate(s["arc0"] + L * t / nn).coords[0] for t in range(nn + 1)]
+            dr.line([T(*p) for p in pts], fill=(230, 140, 0), width=6)
+            mid = line.interpolate((s["arc0"] + s["arc1"]) / 2).coords[0]
+            dr.text((T(*mid)[0] + 8, T(*mid)[1]), f'#{si}', fill=(200, 110, 0))
+        for px, py in (neck["left"], neck["right"]):                     # точки шеи
+            x, y = T(px, py); dr.ellipse([x - 11, y - 11, x + 11, y + 11], outline=(220, 0, 0), width=4)
+        px0, ry = margin + Cw + gap, margin + 40                          # сами детали справа
+        for s in sorted(strips, key=lambda s: s["i"]):
+            pminx = min(p[0] for p in s["poly"]); pminy = min(p[1] for p in s["poly"])
+            poly = [(px0 + (p[0] - pminx) * sc, ry + (p[1] - pminy) * sc) for p in s["poly"]]
+            dr.polygon(poly, outline=(230, 140, 0))
+            dr.text((px0, ry - 16), f'detal #{s["i"]}  L{s["edge"]:.0f} w{s["t_top"]:.0f}/{s["t_bot"]:.0f}', fill=(200, 110, 0))
+            ry += (max(p[1] for p in s["poly"]) - pminy) * sc + gap
+        dr.text((margin, 8), "nizhnie detali korpus->golova: L=#%s  R=#%s" % (neck["seg_left"], neck["seg_right"]), fill=(0, 0, 0))
+    im.save(out_png)
+    return W, H
+
+
+# ---------- карта швов: контур переда, раскрашенный по боковым деталям ----------
+def render_sew_map(contour_mm, g, out_png, target_h=1400, margin=50):
+    """Главный контур переда разбит по цветам отрезков, которые сшиваются с боковинами:
+    цвет дуги = цвету соответствующей боковой детали (#i). Днище — серым (без боковины)."""
+    from PIL import Image, ImageDraw
+    line = g["gusset_line"]
+    x0, y0, x1, y1 = contour_mm.bounds
+    sc = target_h / (y1 - y0)
+    W, H = int((x1 - x0) * sc) + 2 * margin, int((y1 - y0) * sc) + 2 * margin
+    def T(x, y): return (margin + (x - x0) * sc, margin + (y - y0) * sc)
+    im = Image.new("RGB", (W, H), (255, 255, 255)); dr = ImageDraw.Draw(im)
+    dr.line([T(x, y) for x, y in g["bottom_pts"]], fill=(150, 150, 150), width=7)   # днище
+    for s in g["segments"]:
+        col = _palette(s["i"])
+        L = s["arc1"] - s["arc0"]
+        nn = max(8, int(L / 15))
+        pts = [line.interpolate(s["arc0"] + L * t / nn).coords[0] for t in range(nn + 1)]
+        dr.line([T(*p) for p in pts], fill=col, width=6)
+        mid = line.interpolate((s["arc0"] + s["arc1"]) / 2).coords[0]
+        px, py = T(*mid)
+        dr.text((px + 7, py - 6), f'#{s["i"]}', fill=col)
+    dr.text((margin, 8), "kontur perednej chasti: cvet dugi = svoja bokovaja detal (#i)", fill=(0, 0, 0))
     im.save(out_png)
     return W, H
 
