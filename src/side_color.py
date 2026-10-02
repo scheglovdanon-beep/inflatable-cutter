@@ -38,6 +38,48 @@ def _simplify_bands(bands, base, hue_merge_deg=25.0):
     return [(g0, g1, max(cnt, key=cnt.get)) for g0, g1, cnt in groups]
 
 
+def _merge_small_bands(bands, min_frac):
+    """Схлопнуть скопления мелких зон в ОДИН основной цвет.
+    1) прогон из >=2 подряд идущих коротких полос (каждая < min_frac по доле длины)
+       заменяется одной полосой доминирующего по суммарной длине цвета;
+    2) оставшиеся одиночные короткие полосы поглощаются более длинным соседом;
+    3) соседние полосы одного цвета сливаются.
+    Крупные однотонные зоны (вода, пояс) не трогаются."""
+    if min_frac <= 0 or len(bands) <= 1:
+        return bands
+    small = lambda b: (b[1] - b[0]) < min_frac
+    out, i = [], 0
+    while i < len(bands):                                             # 1) прогоны мелких -> доминанта
+        j = i
+        while j < len(bands) and small(bands[j]):
+            j += 1
+        if j - i >= 2:
+            cnt = {}
+            for f0, f1, c in bands[i:j]:
+                cnt[tuple(c)] = cnt.get(tuple(c), 0.0) + (f1 - f0)
+            out.append([bands[i][0], bands[j - 1][1], max(cnt, key=cnt.get)])
+            i = j
+        else:
+            out.append(list(bands[i])); i += 1
+    changed = True
+    while changed and len(out) > 1:                                   # 2) одиночные мелкие -> в длинного соседа
+        changed = False
+        for k in range(len(out)):
+            if small(out[k]):
+                neigh = [n for n in (out[k - 1] if k > 0 else None,
+                                     out[k + 1] if k < len(out) - 1 else None) if n]
+                cand = max(neigh, key=lambda n: n[1] - n[0])
+                cand[0] = min(cand[0], out[k][0]); cand[1] = max(cand[1], out[k][1])
+                out.pop(k); changed = True; break
+    merged = []                                                       # 3) слить соседние одинаковые
+    for b in out:
+        if merged and tuple(merged[-1][2]) == tuple(b[2]):
+            merged[-1][1] = b[1]
+        else:
+            merged.append(list(b))
+    return [(g[0], g[1], tuple(g[2])) for g in merged]
+
+
 def _accentize(c, base, sat_min, val_min):
     """Оставить только насыщенные акценты (пояс/рюкзак/лямки/полоса на голове);
     белый/серый/чёрный (костюм, тени, обводка) -> base (белый)."""
@@ -233,7 +275,8 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
                     raw_c[k] = nb
         cols = [_accentize(c, fallback, sat_min, val_min) for c in raw_c]
         raw = [(float(fs[k]), float(fs[k + 1]), cols[k]) for k in range(M)]
-        s["bands"] = _simplify_bands(raw, fallback, cfg.get("hue_merge_deg", 25.0))  # 1 цвет на акцент
+        bands = _simplify_bands(raw, fallback, cfg.get("hue_merge_deg", 25.0))        # 1 цвет на акцент
+        s["bands"] = _merge_small_bands(bands, cfg.get("band_merge_small_frac", 0.0)) # скопления мелких -> 1 цвет
 
 
 def strip_band_quads(s):
