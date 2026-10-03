@@ -245,7 +245,8 @@ def add_back_panel(layout, contour_mm, fig, cfg, page, gap=120.0):
     bdx = bx - bcm.bounds[0]; bdy = by - bcm.bounds[1]
     back = affinity.translate(bcm, bdx, bdy)
     layout["back"] = {"poly": back, "f_mm": bfig.s * PT2MM, "bdx": bdx, "bdy": bdy,
-                      "src": affinity.translate(bcm, 0, 0)}         # исходный контур (для solve-affine текстуры)
+                      "src": affinity.translate(bcm, 0, 0),         # исходный контур (для solve-affine текстуры)
+                      "cut_pt": bfig.contour_pt}                    # обрезанный контур зада (PT) — фильтр заливок руки
     layout["sheet_h"] = max(layout["sheet_h"], by + (bcm.bounds[3] - bcm.bounds[1]) + gap)
 
 

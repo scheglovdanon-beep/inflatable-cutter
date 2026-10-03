@@ -92,20 +92,44 @@ def main():
         pieces.append((f"rulon_{int(lay['roll'])}mm",
                        [f'<rect x="0" y="0" width="{W:.2f}" height="{H:.2f}" fill="none" stroke="#888" stroke-width="{lw}"/>']))
 
-    # ПЕРЁД (текстура + контур + припуск) — аффин контур->панель (учитывает поворот)
-    pieces.append(("front", [_design_group(front_drawings(page, cfg)[0], _tex_tf(contour_mm, lay["front"], f_mm), f_mm, "front_tex"),
+    # фильтр заливок: оставить те, чей центр ВНУТРИ обрезанного контура (без руки) — убирает
+    # текстуру отрезанной руки БЕЗ clipPath (clipPath заставляет cairosvg растеризовать -> 180MB).
+    from shapely.geometry import Point as _Pt
+    from shapely.prepared import prep as _prep
+    def _inside_fills(dds, poly_pt):
+        pp = _prep(poly_pt.buffer(2))
+        return [dd for dd in dds if pp.contains(_Pt((dd["rect"].x0 + dd["rect"].x1) / 2, (dd["rect"].y0 + dd["rect"].y1) / 2))]
+
+    # ПЕРЁД (текстура без руки + контур + припуск)
+    fr_in = _inside_fills(front_drawings(page, cfg)[0], fig.contour_pt)
+    pieces.append(("front", [_design_group(fr_in, _tex_tf(contour_mm, lay["front"], f_mm), f_mm, "front_tex"),
                              _poly(list(lay["front"].exterior.coords), stroke="#000", sw=lw),
                              _poly(list(lay["front_seam"].exterior.coords), stroke="#dc0000", sw=lw)]))
 
-    # ЗАД (реальная задняя фигура + контур + припуск)
+    # ЗАД (текстура без руки + контур + припуск)
     bk = lay.get("back")
     if bk:
         from sides import back_drawings
-        bbody = [_design_group(back_drawings(page, cfg)[0], _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["f_mm"], "back_tex"),
+        bk_in = _inside_fills(back_drawings(page, cfg)[0], bk["cut_pt"]) if bk.get("cut_pt") else back_drawings(page, cfg)[0]
+        bbody = [_design_group(bk_in, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["f_mm"], "back_tex"),
                  _poly(list(bk["poly"].exterior.coords), stroke="#000", sw=lw)]
         if bk.get("seam"):
             bbody.append(_poly(list(bk["seam"].exterior.coords), stroke="#dc0000", sw=lw))
         pieces.append(("back", bbody))
+
+    # КЛЮЧ СБОРКИ: на переде и заде дуги стыков с боковинами — цвет = цвет боковины, 10 мм
+    def _seam_match(src_poly, dst_poly, fmm, gid):
+        tf = _tex_tf(src_poly, dst_poly, fmm); gl = g["gusset_line"]
+        out = [f'<g id="{gid}">']
+        for s in g["segments"]:
+            a0, a1 = s["arc0"], s["arc1"]; n = max(2, int(abs(a1 - a0) / 6))
+            pts = [tf(*(np.asarray(gl.interpolate(a0 + (a1 - a0) * k / n).coords[0]) / fmm)) for k in range(n + 1)]
+            d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in pts)
+            out.append(f'<path d="{d}" fill="none" stroke="{HEX(_palette(s["i"]))}" '
+                       f'stroke-width="10" stroke-opacity="0.6" stroke-linecap="round"/>')
+        out.append("</g>")
+        return "\n".join(out)
+    pieces.append(("seam_match_front", [_seam_match(contour_mm, lay["front"], f_mm, "seam_front")]))
 
     # БОКОВИНЫ (цвет + контур + припуск [+ отверстие руки])
     for s in lay["strips"]:
