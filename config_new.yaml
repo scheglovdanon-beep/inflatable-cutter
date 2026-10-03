@@ -3,7 +3,7 @@ target_height_mm: 2700
 front_smooth_mm: 140
 expected_arms: 1
 
-seam_allowance_mm: 100          # отступ на пошив 10 см на всех деталях
+seam_allowance_mm: 10           # отступ на пошив 10 мм на всех деталях
 line_width_mm: 0.2
 thickness_mm: 300
 notch_interval_mm: 200
