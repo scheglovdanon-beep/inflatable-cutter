@@ -110,9 +110,13 @@ def _flat(dd, nn=8):
     return subs
 
 
-def front_raster(page, front_drawings_fn, zoom=4.0, mg=6):
+def front_raster(page, front_drawings_fn, zoom=2.0, mg=6):
     """Реконструкция переда из векторных заливок в растр (pt-координаты).
-    Возвращает (arr, bx0, by0, Z, mg)."""
+    Возвращает (arr, bx0, by0, Z, mg). zoom=2 достаточно для сэмпла доминирующих цветов
+    (при zoom=4 растр в 4× больше и медленнее). Кэшируется на page."""
+    cache = getattr(page, "_raster_cache", None)
+    if cache is not None and cache[0] == (zoom, mg):
+        return cache[1]
     from PIL import Image, ImageDraw
     fr, _ = front_drawings_fn(page)
     xs, ys = [], []
@@ -134,7 +138,9 @@ def front_raster(page, front_drawings_fn, zoom=4.0, mg=6):
                 dr.polygon(pts, fill=f)
             if s is not None:
                 dr.line(pts + ([pts[0]] if len(pts) >= 3 else []), fill=s, width=max(1, int(dd.get("width", 0.5) * Z)))
-    return np.asarray(img), bx0, by0, Z, mg
+    out = (np.asarray(img), bx0, by0, Z, mg)
+    page._raster_cache = ((zoom, mg), out)
+    return out
 
 
 def arm_fill_color(page, arm_pt):

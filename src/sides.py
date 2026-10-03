@@ -78,17 +78,31 @@ def _drop_background(drs, R, cfg=None):
     return out
 
 
+_BODIES_CACHE = {}
+
+
+def _bodies(page, cfg):
+    """ДОРОГОЙ общий шаг: заливки -> полигоны -> union -> 2 крупнейших тела (левое=перёд,
+    правое=зад). Кэшируется на (page, пороги фона) — union тысяч заливок делаем ОДИН раз
+    на оба (front_drawings и back_drawings). Возвращает (polys, front, back)."""
+    key = (id(page), (cfg or {}).get("bg_page_frac", 0.95), (cfg or {}).get("bg_soft_frac", 0.80))
+    cached = _BODIES_CACHE.get(key)
+    if cached is not None:
+        return cached
+    drs = _drop_background([x for x in page.get_drawings() if x.get("fill") is not None], page.rect, cfg)
+    polys = [(p, x) for p, x in ((_poly_of(x), x) for x in drs) if p]
+    u = unary_union([p for p, _ in polys])
+    comps = sorted((u.geoms if isinstance(u, MultiPolygon) else [u]), key=lambda g: -g.area)
+    front, back = sorted(comps[:2], key=lambda g: g.centroid.x)
+    res = (polys, front, back)
+    _BODIES_CACHE[key] = res
+    return res
+
+
 def front_drawings(page, cfg=None):
     """Перёд = левое из 2 крупнейших связных тел (руки/мусор отсекаются)."""
     R = page.rect
-    drs = [x for x in page.get_drawings() if x.get("fill") is not None]
-    drs = _drop_background(drs, R, cfg)
-    polys = [(_poly_of(x), x) for x in drs]
-    polys = [(p, x) for p, x in polys if p]
-    u = unary_union([p for p, _ in polys])
-    comps = sorted((u.geoms if isinstance(u, MultiPolygon) else [u]), key=lambda g: -g.area)
-    bodies = sorted(comps[:2], key=lambda g: g.centroid.x)
-    front, back = bodies[0], bodies[1]
+    polys, front, back = _bodies(page, cfg)
     from shapely.prepared import prep
     fcx, fcy = front.centroid.x, front.centroid.y
     bcx, bcy = back.centroid.x, back.centroid.y
@@ -120,13 +134,7 @@ def get_front_figure(page, cfg):
 def back_drawings(page, cfg=None):
     """Зад = ПРАВОЕ из 2 крупнейших связных тел (уже отзеркаленная задняя фигура макета)."""
     R = page.rect
-    drs = [x for x in page.get_drawings() if x.get("fill") is not None]
-    drs = _drop_background(drs, R, cfg)
-    polys = [(p, x) for p, x in ((_poly_of(x), x) for x in drs) if p]
-    u = unary_union([p for p, _ in polys])
-    comps = sorted((u.geoms if isinstance(u, MultiPolygon) else [u]), key=lambda g: -g.area)
-    bodies = sorted(comps[:2], key=lambda g: g.centroid.x)
-    front, back = bodies[0], bodies[1]
+    polys, front, back = _bodies(page, cfg)
     from shapely.prepared import prep
     fcx, fcy = front.centroid.x, front.centroid.y
     bcx, bcy = back.centroid.x, back.centroid.y

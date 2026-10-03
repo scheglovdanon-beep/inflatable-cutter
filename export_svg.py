@@ -86,6 +86,8 @@ def build_layout(page, cfg):
     """Полная раскладка: перёд, боковины(цвет), кисть, рука, днище + припуски.
     Возвращает (lay, fig, contour_mm, g, arm_pts, seam_mm)."""
     from sides import smooth_front
+    if not getattr(page, "_gd_cached", False):                       # кэш get_drawings на весь прогон
+        _gd = page.get_drawings(); page.get_drawings = lambda *a, **k: _gd; page._gd_cached = True
     fig = get_front_figure(page, cfg)
 
     cut_arms = []                                                # отрезанные руки (PT-контуры) — режем ДО раскладки
