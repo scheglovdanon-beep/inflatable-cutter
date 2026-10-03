@@ -18,6 +18,8 @@ def _bezier(p0, p1, p2, p3, n=16):
 
 
 def _poly_of(d):
+    if "_poly" in d:                                   # кэш на самом drawing (парсится и в _bodies,
+        return d["_poly"]                              # и в build_contour) — освобождается вместе с dict
     pts = []
     for it in d["items"]:
         k = it[0]
@@ -29,13 +31,15 @@ def _poly_of(d):
             r = it[1]; pts += [(r.x0, r.y0), (r.x1, r.y0), (r.x1, r.y1), (r.x0, r.y1)]
         elif k == "qu":
             q = it[1]; pts += [(q.ul.x, q.ul.y), (q.ur.x, q.ur.y), (q.lr.x, q.lr.y), (q.ll.x, q.ll.y)]
-    if len(pts) < 3:
-        return None
-    try:
-        p = Polygon(pts).buffer(0)
-        return p if p.area > 0 else None
-    except Exception:
-        return None
+    res = None
+    if len(pts) >= 3:
+        try:
+            p = Polygon(pts).buffer(0)
+            res = p if p.area > 0 else None
+        except Exception:
+            res = None
+    d["_poly"] = res
+    return res
 
 
 @dataclass

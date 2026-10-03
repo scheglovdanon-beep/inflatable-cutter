@@ -91,7 +91,16 @@ def _bodies(page, cfg):
         return cached
     drs = _drop_background([x for x in page.get_drawings() if x.get("fill") is not None], page.rect, cfg)
     polys = [(p, x) for p, x in ((_poly_of(x), x) for x in drs) if p]
-    u = unary_union([p for p, _ in polys])
+    ubase = [p for p, _ in polys]
+    if (cfg or {}).get("front_all_details", False):                  # классификация по центроидам тел:
+        shp = sorted(ubase, key=lambda p: -p.area)                   # для поиска 2 тел достаточно КРУПНЫХ
+        tot = sum(p.area for p in shp); acc = 0.0; big = []          # заливок (покрыть ~98% площади) —
+        for p in shp:                                                # union 14000 мелких -> ~19с, крупных -> ~1с.
+            big.append(p); acc += p.area
+            if acc >= 0.98 * tot:
+                break
+        ubase = big or ubase
+    u = unary_union(ubase)
     comps = sorted((u.geoms if isinstance(u, MultiPolygon) else [u]), key=lambda g: -g.area)
     front, back = sorted(comps[:2], key=lambda g: g.centroid.x)
     res = (polys, front, back)
