@@ -88,6 +88,7 @@ def main():
     pt2cv = lambda x, y: T(*_ftf(x, y))
     col = lambda c: tuple(int(255 * v) for v in c) if c else None
     fr, _ = front_drawings(page, cfg)
+    flayer = Image.new("RGB", im.size, (255, 255, 255)); fld = ImageDraw.Draw(flayer)
     for dd in fr:
         f = col(dd.get("fill")); s = col(dd.get("color"))
         for sub in _flat(dd):
@@ -95,9 +96,12 @@ def main():
                 continue
             pts = [pt2cv(x, y) for x, y in sub]
             if f is not None and len(pts) >= 3:
-                dr.polygon(pts, fill=f)
+                fld.polygon(pts, fill=f)
             if s is not None:
-                dr.line(pts + ([pts[0]] if len(pts) >= 3 else []), fill=s, width=max(1, int(dd.get("width", .5) * f_mm * sc)))
+                fld.line(pts + ([pts[0]] if len(pts) >= 3 else []), fill=s, width=max(1, int(dd.get("width", .5) * f_mm * sc)))
+    fmask = Image.new("L", im.size, 0)                              # обрезка текстуры по контуру (без руки)
+    ImageDraw.Draw(fmask).polygon([T(x, y) for x, y in lay["front"].exterior.coords], fill=255)
+    im.paste(flayer, (0, 0), fmask)
 
     # ----- ПЕРЁД: контур-шов (сплошной, 0.2мм) + подпись -----
     dr.line([T(x, y) for x, y in lay["front"].exterior.coords], fill=(0, 0, 0), width=lw)
@@ -108,6 +112,7 @@ def main():
     if bk:
         from sides import back_drawings
         bmap = _tex_tf(bk["src"], bk["poly"], bk["f_mm"])         # аффин контур зада->панель (поворот)
+        blayer = Image.new("RGB", im.size, (255, 255, 255)); bld = ImageDraw.Draw(blayer)
         for dd in back_drawings(page, cfg)[0]:                     # текстура ЗАДНЕЙ фигуры макета
             f = col(dd.get("fill")); s = col(dd.get("color"))
             for sub in _flat(dd):
@@ -115,9 +120,12 @@ def main():
                     continue
                 pts = [T(*bmap(x, y)) for x, y in sub]
                 if f is not None and len(pts) >= 3:
-                    dr.polygon(pts, fill=f)
+                    bld.polygon(pts, fill=f)
                 if s is not None:
-                    dr.line(pts + ([pts[0]] if len(pts) >= 3 else []), fill=s, width=max(1, int(dd.get("width", .5) * f_mm * sc)))
+                    bld.line(pts + ([pts[0]] if len(pts) >= 3 else []), fill=s, width=max(1, int(dd.get("width", .5) * f_mm * sc)))
+        bmask = Image.new("L", im.size, 0)                         # обрезка текстуры зада по контуру (без руки)
+        ImageDraw.Draw(bmask).polygon([T(x, y) for x, y in bk["poly"].exterior.coords], fill=255)
+        im.paste(blayer, (0, 0), bmask)
         dr.line([T(x, y) for x, y in bk["poly"].exterior.coords], fill=(0, 0, 0), width=lw)
         label(bk["poly"], "ZAD")
 
@@ -192,10 +200,11 @@ def main():
         ay = np.linalg.lstsq(Mx, dst[:, 1], rcond=None)[0]
         return np.array([ax, ay])
 
-    def render_piece(poly, kind, src):
+    def render_piece(poly, kind, src, fill=None):
         nonlocal im, dr
-        if kind == "arm":                                           # база/плечо/предплечье — ЧЁРНАЯ
-            dr.polygon([T(x, y) for x, y in poly.exterior.coords], fill=arm_col, outline=(150, 0, 150))
+        if kind == "arm":                                           # база/плечо/предплечье — цвет зоны
+            dr.polygon([T(x, y) for x, y in poly.exterior.coords],
+                       fill=tuple(fill) if fill else arm_col, outline=(150, 0, 150))
             return
         mask = Image.new("L", im.size, 0)
         ImageDraw.Draw(mask).polygon([T(x, y) for x, y in poly.exterior.coords], fill=255)
@@ -225,7 +234,7 @@ def main():
         render_piece(hpiece["poly"], "hand", hpiece.get("src"))
         label(hpiece["poly"], lbl(hpiece["name"]))
     for sp in lay.get("spare_arm", []):                             # ЗАПАСНАЯ РУКА (копия)
-        render_piece(sp["poly"], sp["kind"], sp.get("src"))
+        render_piece(sp["poly"], sp["kind"], sp.get("src"), sp.get("fill"))
         label(sp["poly"], lbl(sp.get("name", "")))
 
     # ----- ПРИПУСК НА ШОВ +Nмм: контур реза вокруг каждого лекала (сплошной, 0.2мм) -----

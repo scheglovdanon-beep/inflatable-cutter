@@ -90,24 +90,8 @@ def build_layout(page, cfg):
 
     cut_arms = []                                                # отрезанные руки (PT-контуры) — режем ДО раскладки
     if cfg.get("arm_cut") == "armpit":
-        from arm import detect_armpits, cut_across_arm
-        body_pt = fig.contour_pt                                 # силуэт переда в PT (фон уже убран)
-        arms = detect_armpits(body_pt, cfg)
-        exp = cfg.get("expected_arms")
-        if exp is not None and len(arms) > exp:                   # кандидатов больше, чем рук: оставить
-            from side_color import arm_fill_color                 # самые «рукоподобные» по цвету
-            def _warmth(a):                                       # кожа/рукав: R>>B (+); шланг/вода: B>>R (-)
-                c = arm_fill_color(page, np.asarray(a["poly"].exterior.coords, float))
-                return int(c[0]) - int(c[2])
-            arms = sorted(arms, key=_warmth, reverse=True)[:exp]
-        if exp is not None and len(arms) != exp:
-            raise RuntimeError(f"ожидалось {exp} рук, найдено {len(arms)}")
-        for a in arms:
-            arm_poly, body_pt = cut_across_arm(body_pt, a["f"], a["tip"], cfg, blade=a.get("blade"))
-            if arm_poly is None:
-                raise RuntimeError("рез от подмышки не разделил тело — проверь пороги")
-            cut_arms.append({"poly_pt": arm_poly, "f": a["f"], "tip": a["tip"]})
-        fig.contour_pt = body_pt                                 # ТЕЛО БЕЗ РУКИ — дальше всё по нему
+        from arm import cut_waving_arms
+        fig.contour_pt, cut_arms = cut_waving_arms(page, fig.contour_pt, cfg, strict=True)  # ТЕЛО переда БЕЗ руки
 
     contour_mm = smooth_front(contour_to_mm(fig), cfg)
     g = build_gusset(contour_mm, cfg); classify_sides(g, contour_mm)
@@ -161,8 +145,8 @@ def build_layout(page, cfg):
                     arm_pts = ap
                 place_armpit_hole(lay, g, contour_mm, ca["f"], fig, cfg)
 
-    if cfg.get("make_appendages", True) and cfg.get("make_spare_arm", True):
-        from arm import add_spare_arm
+    if cfg.get("make_spare_arm", True) and (lay.get("arm_pieces") or lay.get("hand_pieces")):
+        from arm import add_spare_arm                             # запаска — если есть детали руки (любой путь)
         add_spare_arm(lay)                                        # запасная рука (копия) — ниже всего
     color_sides(lay, g, contour_mm, fig, page, front_drawings, cfg)
     seam_mm = cfg.get("seam_allowance_mm", 10)

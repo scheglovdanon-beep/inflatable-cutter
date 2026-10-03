@@ -3,7 +3,7 @@ target_height_mm: 2700
 front_smooth_mm: 140
 expected_arms: 1
 
-seam_allowance_mm: 10
+seam_allowance_mm: 100          # отступ на пошив 10 см на всех деталях
 line_width_mm: 0.2
 thickness_mm: 300
 notch_interval_mm: 200
@@ -43,11 +43,11 @@ smooth_tol_mm: 1.0
 arm_cut: "armpit"
 make_appendages: false
 make_hand: false
-make_spare_arm: false
+make_spare_arm: true            # дополнительная (запасная) рука — копия ниже всего
 arm_from_contour: false
 make_base: true
 make_back: true
-repack: false
+repack: true                    # все детали разложены рядом без наложений
 roll_pack: false
 roll_width_mm: 1440
 

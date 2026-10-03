@@ -405,6 +405,36 @@ def _refine_armpit(body, base, all_f, cfg, Wb, Hb, axx, min_arm, max_arm,
     return best
 
 
+def cut_waving_arms(page, contour_pt, cfg, strict=True):
+    """Вырезать машущие руки ОТ ПОДМЫШКИ из контура (PT). Возвращает (body_pt, cut_arms).
+    При кандидатов>expected_arms оставляем самые «рукоподобные» по цвету (кожа/рукав R>>B,
+    не шланг/вода). strict=True (перёд): расхождение с expected_arms -> ошибка; strict=False
+    (зад): режем best-effort без ошибок. Общий путь для переда и зада."""
+    if cfg.get("arm_cut") != "armpit":
+        return contour_pt, []
+    body_pt = contour_pt
+    arms = detect_armpits(body_pt, cfg)
+    exp = cfg.get("expected_arms")
+    if exp is not None and len(arms) > exp:
+        from side_color import arm_fill_color
+        def _warmth(a):
+            c = arm_fill_color(page, np.asarray(a["poly"].exterior.coords, float))
+            return int(c[0]) - int(c[2])
+        arms = sorted(arms, key=_warmth, reverse=True)[:exp]
+    if strict and exp is not None and len(arms) != exp:
+        raise RuntimeError(f"ожидалось {exp} рук, найдено {len(arms)}")
+    cut = []
+    for a in arms:
+        arm_poly, body2 = cut_across_arm(body_pt, a["f"], a["tip"], cfg, blade=a.get("blade"))
+        if arm_poly is None:
+            if strict:
+                raise RuntimeError("рез от подмышки не разделил тело — проверь пороги")
+            continue
+        body_pt = body2
+        cut.append({"poly_pt": arm_poly, "f": a["f"], "tip": a["tip"]})
+    return body_pt, cut
+
+
 def detect_armpits(body, cfg):
     """Найти машущие руки по вогнутым изломам (подмышкам) контура тела (PT).
     Возвращает список {f:(x,y), tip:(x,y), poly:arm, len, side, blade}. 1 для A/B/D/E, 2 для C.

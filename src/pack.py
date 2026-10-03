@@ -47,6 +47,15 @@ def _units(layout):
                     p["seam"] = affinity.translate(p["seam"], dx, dy)
             add(p.get("seam") or p["poly"], mv)
 
+    bk = layout.get("back")
+    if bk:
+        def mv_bk(dx, dy, bk=bk):
+            bk["poly"] = affinity.translate(bk["poly"], dx, dy)
+            bk["bdx"] = bk.get("bdx", 0) + dx; bk["bdy"] = bk.get("bdy", 0) + dy
+            if bk.get("seam") is not None:
+                bk["seam"] = affinity.translate(bk["seam"], dx, dy)
+        add(bk.get("seam") or bk["poly"], mv_bk)
+
     b = layout.get("base")
     if b:
         def mv_dn(dx, dy, b=b):

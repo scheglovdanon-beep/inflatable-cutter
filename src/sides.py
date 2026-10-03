@@ -210,6 +210,9 @@ def add_back_panel(layout, contour_mm, fig, cfg, page, gap=120.0):
     if not cfg.get("make_back"):
         return
     bfig = get_back_figure(page, cfg)
+    if cfg.get("arm_cut") == "armpit":                               # зад тоже обрезаем по контуру БЕЗ руки
+        from arm import cut_waving_arms
+        bfig.contour_pt, _ = cut_waving_arms(page, bfig.contour_pt, cfg, strict=False)
     bcm = smooth_front(contour_to_mm(bfig), cfg)                     # контур зада в мм (как у переда)
     gmax = layout["front"].bounds[3]
     for s in layout.get("strips", []):
