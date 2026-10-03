@@ -252,18 +252,29 @@ def _wrist_by_width(arm_poly, tip, armpit_f, cfg):
 
 
 def _contour_notches(pts):
-    """Вогнутые «уголки» контура (convexity defects) = точки перехода форм. [(point, depth_pt)]."""
+    """Вогнутые «уголки» контура (convexity defects) = точки перехода форм. [(point, depth_pt)].
+    Устойчиво к самопересечениям/дублям: убираем подряд идущие дубли (из-за округления в int,
+    они ломают монотонность hull) и ловим cv2.error (кривой контур -> нет уголков)."""
     P = np.asarray(pts, float)
-    c = (P - P.min(0)).astype(np.int32).reshape(-1, 1, 2)
-    if len(c) < 4:
+    if len(P) < 4:
         return []
-    hull = cv2.convexHull(c, returnPoints=False)
-    if hull is None or len(hull) < 3:
+    Q = (P - P.min(0)).astype(np.int32)
+    keep = np.ones(len(Q), bool)
+    keep[1:] = np.any(Q[1:] != Q[:-1], axis=1)          # дедуп подряд идущих одинаковых
+    Q = Q[keep]; Pk = P[keep]
+    if len(Q) < 4:
         return []
-    D = cv2.convexityDefects(c, hull)
+    c = Q.reshape(-1, 1, 2)
+    try:
+        hull = cv2.convexHull(c, returnPoints=False)
+        if hull is None or len(hull) < 3:
+            return []
+        D = cv2.convexityDefects(c, hull)
+    except cv2.error:
+        return []
     if D is None:
         return []
-    return [(P[int(f)], depth / 256.0) for s, e, f, depth in D.reshape(-1, 4)]
+    return [(Pk[int(f)], depth / 256.0) for s, e, f, depth in D.reshape(-1, 4)]
 
 
 def _snap_wrist_to_notches(arm_poly, B, T, tip, cfg):
