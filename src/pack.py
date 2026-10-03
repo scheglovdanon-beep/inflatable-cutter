@@ -8,6 +8,104 @@ from shapely.geometry import Polygon, box
 from shapely import affinity
 
 
+def _movables(layout):
+    """Все подвижные детали с категорией и своим move(dx,dy) (двигает poly + припуск + данные)."""
+    items = []
+
+    def add(cat, poly, mv):
+        b = poly.bounds
+        items.append({"cat": cat, "x": b[0], "y": b[1], "w": b[2] - b[0], "h": b[3] - b[1], "mv": mv})
+
+    def mvf(dx, dy):
+        layout["front"] = affinity.translate(layout["front"], dx, dy)
+        if layout.get("front_seam") is not None:
+            layout["front_seam"] = affinity.translate(layout["front_seam"], dx, dy)
+        layout["front_x"] = layout.get("front_x", 0) + dx
+    if "front" in layout:
+        add("front", layout.get("front_seam") or layout["front"], mvf)
+
+    bk = layout.get("back")
+    if bk:
+        def mvb(dx, dy):
+            bk["poly"] = affinity.translate(bk["poly"], dx, dy)
+            if bk.get("seam") is not None:
+                bk["seam"] = affinity.translate(bk["seam"], dx, dy)
+        add("back", bk.get("seam") or bk["poly"], mvb)
+
+    for s in layout.get("strips", []):
+        def mvs(dx, dy, s=s):
+            s["poly"] = [(x + dx, y + dy) for x, y in s["poly"]]
+            if s.get("seam") is not None:
+                s["seam"] = affinity.translate(s["seam"], dx, dy)
+            s["x"] = s.get("x", 0) + dx; s["y"] = s.get("y", 0) + dy
+            ah = layout.get("arm_hole")
+            if ah and ah.get("piece") == s["i"]:
+                ah["cx"] += dx; ah["cy"] += dy
+            for ah in layout.get("arm_holes", []):
+                if ah.get("piece") == s["i"]:
+                    ah["cx"] += dx; ah["cy"] += dy
+        add("strip_" + (s.get("side") or "left"), s.get("seam") or Polygon(s["poly"]), mvs)
+
+    for key in ("arm_pieces", "hand_pieces", "spare_arm"):
+        for p in layout.get(key, []):
+            def mvp(dx, dy, p=p):
+                p["poly"] = affinity.translate(p["poly"], dx, dy)
+                if p.get("seam") is not None:
+                    p["seam"] = affinity.translate(p["seam"], dx, dy)
+            add("arm", p.get("seam") or p["poly"], mvp)
+
+    b = layout.get("base")
+    if b:
+        def mvdn(dx, dy):
+            b["dnishe"] = affinity.translate(b["dnishe"], dx, dy); b["fan_c"] = (b["fan_c"][0] + dx, b["fan_c"][1] + dy)
+            if b.get("dnishe_seam") is not None:
+                b["dnishe_seam"] = affinity.translate(b["dnishe_seam"], dx, dy)
+        add("base", b.get("dnishe_seam") or b["dnishe"], mvdn)
+        lx, ly, lw, lh = b["leg"]
+        def mvleg(dx, dy):
+            lx, ly, lw, lh = b["leg"]; b["leg"] = (lx + dx, ly + dy, lw, lh)
+            if b.get("leg_seam") is not None:
+                b["leg_seam"] = affinity.translate(b["leg_seam"], dx, dy)
+        add("leg", b.get("leg_seam") or box(lx, ly, lx + lw, ly + lh), mvleg)
+    return items
+
+
+def arrange_sides(layout, gap=120.0):
+    """Раскладка по колонкам: [руки(ориг+запас)] [левые боковины] [перёд+зад] [правые боковины],
+    днище+ножка — внизу по центру. Каждая колонка — стопка сверху вниз."""
+    items = _movables(layout)
+    cats = {}
+    for it in items:
+        cats.setdefault(it["cat"], []).append(it)
+
+    def column(lst, x, y0=gap):
+        y, maxw = y0, 0.0
+        for it in lst:
+            it["mv"](x - it["x"], y - it["y"])
+            y += it["h"] + gap; maxw = max(maxw, it["w"])
+        return maxw, y - gap
+
+    x = gap; bottom = gap
+    for group in (cats.get("arm", []),
+                  cats.get("strip_left", []),
+                  cats.get("front", []) + cats.get("back", []),
+                  cats.get("strip_right", [])):
+        if not group:
+            continue
+        w, yb = column(group, x)
+        x += w + gap; bottom = max(bottom, yb)
+
+    base = cats.get("base", []) + cats.get("leg", [])            # днище+ножка — внизу по центру, в ряд
+    if base:
+        bx = gap; by = bottom + gap
+        for it in base:
+            it["mv"](bx - it["x"], by - it["y"]); bx += it["w"] + gap
+        bottom = by + max(it["h"] for it in base)
+
+    layout["sheet_w"] = x + gap
+    layout["sheet_h"] = bottom + gap
+
+
 def _units(layout):
     """Список единиц раскладки: {bbox, move(dx,dy)} — деталь + её вложенные элементы."""
     U = []
