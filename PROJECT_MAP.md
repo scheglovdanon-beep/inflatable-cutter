@@ -84,6 +84,7 @@
 | Скрипт | Что делает |
 |--------|------------|
 | `texture_view.py <pdf> --config <cfg> -o out/x.png` | ПОЛНАЯ раскладка (всё + припуски), единый вход `build_layout` |
+| `print_sheet.py <pdf> --config <cfg> -o out/x.png` | ДВА листа в одном PNG: готовый вариант (repack) сверху + раскладка на печать (рулон, roll_pack) снизу |
 | `export_svg.py` | вектор SVG (текстура через аффин контур→панель) |
 | `export_pdf_grouped.py` | PDF с группами под CorelDRAW |
 | `arm_separate.py` | перёд БЕЗ руки + отрезанная рука (отладка реза от подмышки) |

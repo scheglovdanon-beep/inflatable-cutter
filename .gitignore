@@ -6,3 +6,5 @@ __pycache__/
 
 .arena/
 _render_etalon.py
+out/_ps_*
+out/_roll_cfg.yaml
