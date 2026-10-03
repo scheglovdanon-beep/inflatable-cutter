@@ -41,8 +41,10 @@ def _piece_svg(p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill="#f5f
         else:                                                        # полоска-боковина = цвет кисти
             body.append(_poly(list(poly.exterior.coords), fill=hand_fill, stroke="none", sw=0))
         body.append(_poly(list(poly.exterior.coords), stroke="#009659", sw=lw))
-    else:                                                            # база/плечо/предплечье — цвет руки (чёрный)
-        body.append(_poly(list(poly.exterior.coords), fill=arm_fill, stroke="#960096", sw=lw))
+    else:                                                            # база/плечо/предплечье — цвет своей зоны
+        pc = p.get("fill")
+        fill = ("#%02x%02x%02x" % tuple(int(v) for v in pc)) if pc else arm_fill
+        body.append(_poly(list(poly.exterior.coords), fill=fill, stroke="#960096", sw=lw))
     if p.get("seam"):
         body.append(_poly(list(p["seam"].exterior.coords), stroke="#dc0000", sw=lw))
     return body

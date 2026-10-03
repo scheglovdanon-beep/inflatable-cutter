@@ -162,9 +162,10 @@ def main():
         dr.ellipse([T(ah["cx"] - ah["r"], ah["cy"] - ah["r"]), T(ah["cx"] + ah["r"], ah["cy"] + ah["r"])],
                    outline=(220, 0, 0), width=lw)
 
-    # ----- РУКА (база/плечо/предплечье) — ЧЁРНАЯ (цвет рукава с 2D) + подпись -----
+    # ----- РУКА (база/плечо/предплечье) — цвет своей зоны (предплечье/плечо с 2D) + подпись -----
     for ap in lay.get("arm_pieces", []):
-        dr.polygon([T(x, y) for x, y in ap["poly"].exterior.coords], fill=arm_col, outline=(150, 0, 150))
+        dr.polygon([T(x, y) for x, y in ap["poly"].exterior.coords],
+                   fill=tuple(ap.get("fill", arm_col)), outline=(150, 0, 150))
         label(ap["poly"], lbl(ap.get("name", "")))
 
     # ----- КИСТЬ: текстура жёстко привязана к контуру через аффин src(pt)->poly(раскладка) -----

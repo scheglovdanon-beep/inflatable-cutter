@@ -243,7 +243,9 @@ def main():
     # РУКА (база/плечо/предплечье), ДНИЩЕ, ножка, отверстия — контуры
     svg.append('<g id="arm">')
     for apc in lay.get("arm_pieces", []):
-        svg.append(_poly(list(apc["poly"].exterior.coords), stroke="#960096", sw=lw))
+        pc = apc.get("fill")                                          # цвет зоны (предплечье/плечо)
+        fill = HEX(tuple(int(v) for v in pc)) if pc else "none"
+        svg.append(_poly(list(apc["poly"].exterior.coords), fill=fill, stroke="#960096", sw=lw))
     svg.append("</g>")
     b = lay.get("base")
     if b:

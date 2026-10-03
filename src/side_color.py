@@ -177,6 +177,31 @@ def hand_fill_color(page, hand_pt):
     return max(areas, key=areas.get) if areas else (245, 245, 245)
 
 
+def arm_zone_color(page, arm_poly, origin, u, s0, s1):
+    """Доминирующая заливка 2D ВНУТРИ руки в осевой полосе [s0,s1): s = проекция центра
+    заливки на ось u от origin (origin=середина запястья, u -> к подмышке). Делит руку на
+    предплечье [0..локоть] и плечо [локоть..подмышка]. near-чёрный контур исключаем, бельё
+    (белый рукав/перчатка) оставляем. Возвращает (r,g,b) или None."""
+    from collections import defaultdict
+    from shapely.geometry import Point
+    from shapely.prepared import prep
+    pp = prep(arm_poly.buffer(1.0)); o = np.asarray(origin, float); uu = np.asarray(u, float)
+    areas = defaultdict(float)
+    for dd in page.get_drawings():
+        f = dd.get("fill")
+        if f is None:
+            continue
+        r = dd["rect"]; cx, cy = (r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0
+        s = (np.array([cx, cy]) - o) @ uu
+        if not (s0 <= s < s1) or not pp.contains(Point(cx, cy)):
+            continue
+        c = tuple(int(255 * v) for v in f)
+        if sum(c) < 60:                                              # near-чёрный = контур, не цвет зоны
+            continue
+        areas[c] += r.width * r.height
+    return max(areas, key=areas.get) if areas else None
+
+
 def base_fill_color(page, front_drawings_fn):
     """Цвет ДНИЩА/ножки по 2D: доминирующий цвет низа фигуры (там обычно чёрная база/тень)."""
     arr, bx0, by0, Z, mg = front_raster(page, front_drawings_fn)

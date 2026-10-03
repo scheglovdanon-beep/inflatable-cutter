@@ -980,6 +980,15 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg):
     hand = build_hand(hand_pts, fore_pts, wrist, scale,
                       fore_top_mm=fore_top, fore_bot_mm=fore_bot)
 
+    # 4) ЦВЕТ ЗОН: детект локтя -> цвет предплечья (кожа) и плеча (рукав) с РЕАЛЬНОЙ руки.
+    #    predplechie = цвет предплечья; plecho и baza(полоска крепления) = цвет плеча.
+    elbow_cut, fore_color, sh_color = _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip_used, cfg)
+    if fore_color is not None:
+        pred["fill"] = fore_color
+    if sh_color is not None:
+        plec["fill"] = sh_color
+        baza["fill"] = sh_color
+
     hole_d = cfg.get("arm_hole_diameter_mm", 250)
     hole_c = math.pi * hole_d
     diag = {
@@ -987,8 +996,38 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg):
         "base_bottom": baza["edge_bottom"], "base_top": baza["edge_top"],   # база: низ↔Ø250, верх↔плечо
         "sh_bottom": plec["edge_bottom"], "sh_top": plec["edge_top"],       # плечо: низ↔база, верх↔локоть
         "fore_bottom": pred["edge_bottom"], "fore_top": pred["edge_top"],   # предпл: низ↔плечо, верх↔кисть
+        "elbow": elbow_cut, "fore_color": fore_color, "sh_color": sh_color,
     }
     return {"pieces": pieces, "hand": hand, "diag": diag}
+
+
+def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg):
+    """Локоть = самая глубокая вогнутость контура руки в осевой полосе между запястьем и
+    подмышкой. Делит руку на предплечье (запястье..локоть) и плечо (локоть..подмышка);
+    возвращает (elbow_chord, fore_color, sh_color). Цвета берутся из 2D по зонам."""
+    from side_color import arm_zone_color
+    wmid = (np.asarray(wrist[0], float) + np.asarray(wrist[1], float)) / 2.0
+    tip = np.asarray(tip, float)
+    far = arm_arr[int(np.argmax(np.hypot(arm_arr[:, 0] - tip[0], arm_arr[:, 1] - tip[1])))]  # подмышка
+    u = far - wmid; L = float(np.hypot(*u))
+    if L < 1e-6:
+        return None, None, None
+    u = u / L
+    lo = cfg.get("elbow_search_lo_frac", 0.20) * L
+    hi = cfg.get("elbow_search_hi_frac", 0.85) * L
+    min_d = cfg.get("elbow_min_depth_frac", 0.08) * L
+    elbow_s, elbow_p, best = 0.5 * L, None, min_d                   # дефолт — середина оси
+    for p, d in _contour_notches(arm_arr):
+        s = float((np.asarray(p, float) - wmid) @ u)
+        if lo <= s <= hi and d > best:
+            best = d; elbow_s = s; elbow_p = np.asarray(p, float)
+    fore = arm_zone_color(page, arm_poly, wmid, u, 0.0, elbow_s)     # запястье..локоть = предплечье
+    sh = arm_zone_color(page, arm_poly, wmid, u, elbow_s, L + 1e6)   # локоть..подмышка = плечо
+    elbow_chord = None
+    if elbow_p is not None:
+        ch = _perp_chord(arm_poly, elbow_p, u)
+        elbow_chord = (tuple(ch[0]), tuple(ch[1])) if ch is not None else None
+    return elbow_chord, fore, sh
 
 
 def build_arm_measured(page, fig, cfg):

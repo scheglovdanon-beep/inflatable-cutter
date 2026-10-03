@@ -52,6 +52,7 @@
 - Детект кисти (запястье): `_wrist_by_width` (:200, профиль ширины), `_snap_wrist_to_notches` (:269), `_contour_notches` (:254), `detect_wrist` (:497), `detect_wrist_color` (:808), `_wrist_on_poly` (:901, выбор метода), `_wrist_score` (:877).
 - Рез/разделение: `cut_arm` (:575), `_top_edge` (:600).
 - Сборка по шаблону: `build_arm` (:67, эталон Ø250), `build_arm_from_poly` (:951), `build_arm_measured` (:994), `build_hand` (:636), `_develop_frustum` (:783), `measure_edges` (:36).
+- Детект локтя + цвет зон: `_arm_zone_colors` — локоть = глубочайшая вогнутость в осевой полосе [elbow_search_lo/hi_frac] между запястьем и подмышкой; делит руку на предплечье/плечо, цвета через `side_color.arm_zone_color`. Привязка: predplechie=цвет предплечья, plecho+baza(полоска крепления)=цвет плеча. Рендер детали руки: piece["fill"] в texture_view/export_svg/export_pdf.
 - Размещение: `place_arm` (:707), `place_hand` (:751), `place_arm_piece` (:473), `add_spare_arm` (:1049).
 - Геометрия руки: `arm_shoulder_xy` (:860), `local_arm_thickness` (:295), `_perp_chord` (:184).
 - Отладка: `render_hand` (:1082).
