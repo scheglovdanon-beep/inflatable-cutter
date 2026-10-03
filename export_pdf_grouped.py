@@ -117,19 +117,29 @@ def main():
             bbody.append(_poly(list(bk["seam"].exterior.coords), stroke="#dc0000", sw=lw))
         pieces.append(("back", bbody))
 
-    # КЛЮЧ СБОРКИ: на переде и заде дуги стыков с боковинами — цвет = цвет боковины, 10 мм
-    def _seam_match(src_poly, dst_poly, fmm, gid):
-        tf = _tex_tf(src_poly, dst_poly, fmm); gl = g["gusset_line"]
+    # КЛЮЧ СБОРКИ: дуги стыков с боковинами — цвет = цвет боковины, 10 мм. На переде по gusset_line,
+    # на заде — зеркало переда в его bbox (зад = зеркало переда: «обе передние части»).
+    tf_f = _tex_tf(contour_mm, lay["front"], f_mm); gl = g["gusset_line"]
+    front_arcs = []
+    for s in g["segments"]:
+        a0, a1 = s["arc0"], s["arc1"]; n = max(2, int(abs(a1 - a0) / 6))
+        pts = [tf_f(*(np.asarray(gl.interpolate(a0 + (a1 - a0) * k / n).coords[0]) / f_mm)) for k in range(n + 1)]
+        front_arcs.append((HEX(_palette(s["i"])), pts))
+
+    def _arc_paths(arcs, gid):
         out = [f'<g id="{gid}">']
-        for s in g["segments"]:
-            a0, a1 = s["arc0"], s["arc1"]; n = max(2, int(abs(a1 - a0) / 6))
-            pts = [tf(*(np.asarray(gl.interpolate(a0 + (a1 - a0) * k / n).coords[0]) / fmm)) for k in range(n + 1)]
+        for col, pts in arcs:
             d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in pts)
-            out.append(f'<path d="{d}" fill="none" stroke="{HEX(_palette(s["i"]))}" '
-                       f'stroke-width="10" stroke-opacity="0.6" stroke-linecap="round"/>')
+            out.append(f'<path d="{d}" fill="none" stroke="{col}" stroke-width="10" stroke-opacity="0.6" stroke-linecap="round"/>')
         out.append("</g>")
         return "\n".join(out)
-    pieces.append(("seam_match_front", [_seam_match(contour_mm, lay["front"], f_mm, "seam_front")]))
+    pieces.append(("seam_match_front", [_arc_paths(front_arcs, "seam_front")]))
+    if bk:                                                            # зеркало дуг переда в bbox зада
+        fb = lay["front"].bounds; bbx = bk["poly"].bounds
+        fw = (fb[2] - fb[0]) or 1.0; fh = (fb[3] - fb[1]) or 1.0; bw = bbx[2] - bbx[0]; bh = bbx[3] - bbx[1]
+        mir = lambda p: (bbx[0] + (1 - (p[0] - fb[0]) / fw) * bw, bbx[1] + (p[1] - fb[1]) / fh * bh)
+        back_arcs = [(col, [mir(p) for p in pts]) for col, pts in front_arcs]
+        pieces.append(("seam_match_back", [_arc_paths(back_arcs, "seam_back")]))
 
     # БОКОВИНЫ (цвет + контур + припуск [+ отверстие руки])
     for s in lay["strips"]:
