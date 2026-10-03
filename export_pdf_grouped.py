@@ -117,8 +117,27 @@ def main():
             bbody.append(_poly(list(bk["seam"].exterior.coords), stroke="#dc0000", sw=lw))
         pieces.append(("back", bbody))
 
-    # КЛЮЧ СБОРКИ: дуги стыков с боковинами — цвет = цвет боковины, 10 мм. На переде по gusset_line,
-    # на заде — зеркало переда в его bbox (зад = зеркало переда: «обе передние части»).
+    # КЛЮЧ СБОРКИ: дуги стыков с боковинами — цвет = цвет боковины. Подсветка лежит В КОЛЬЦЕ
+    # ПРИПУСКА (смещена НАРУЖУ на ~половину припуска, ширина < припуска) — НЕ заходит за контур
+    # (рекламная конструкция, строго). На переде по gusset_line, на заде — зеркало переда.
+    from shapely.geometry import Point as _Pt2
+    from shapely.prepared import prep as _prep2
+    seam_mm_v = cfg.get("seam_allowance_mm", 10)
+    off = seam_mm_v / 2.0; sw_seam = max(2.0, seam_mm_v - 3.0)       # в пределах кольца, не за контур
+
+    def _offset_out(pts, panel_prep, d):
+        arr = np.asarray(pts, float); res = []
+        for i in range(len(arr)):
+            a = arr[max(0, i - 1)]; b = arr[min(len(arr) - 1, i + 1)]
+            t = b - a; L = float(np.hypot(*t))
+            if L < 1e-6:
+                res.append((arr[i][0], arr[i][1])); continue
+            nrm = np.array([-t[1], t[0]]) / L
+            if panel_prep.contains(_Pt2(*(arr[i] + nrm * 0.6))):     # наружу = где НЕ внутри панели
+                nrm = -nrm
+            res.append(tuple(arr[i] + nrm * d))
+        return res
+
     tf_f = _tex_tf(contour_mm, lay["front"], f_mm); gl = g["gusset_line"]
     front_arcs = []
     for s in g["segments"]:
@@ -126,20 +145,20 @@ def main():
         pts = [tf_f(*(np.asarray(gl.interpolate(a0 + (a1 - a0) * k / n).coords[0]) / f_mm)) for k in range(n + 1)]
         front_arcs.append((HEX(_palette(s["i"])), pts))
 
-    def _arc_paths(arcs, gid):
-        out = [f'<g id="{gid}">']
+    def _arc_paths(arcs, panel, gid):
+        pp = _prep2(panel); out = [f'<g id="{gid}">']
         for col, pts in arcs:
-            d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in pts)
-            out.append(f'<path d="{d}" fill="none" stroke="{col}" stroke-width="10" stroke-opacity="0.6" stroke-linecap="round"/>')
+            d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _offset_out(pts, pp, off))
+            out.append(f'<path d="{d}" fill="none" stroke="{col}" stroke-width="{sw_seam}" stroke-linecap="round"/>')
         out.append("</g>")
         return "\n".join(out)
-    pieces.append(("seam_match_front", [_arc_paths(front_arcs, "seam_front")]))
+    pieces.append(("seam_match_front", [_arc_paths(front_arcs, lay["front"], "seam_front")]))
     if bk:                                                            # зеркало дуг переда в bbox зада
         fb = lay["front"].bounds; bbx = bk["poly"].bounds
         fw = (fb[2] - fb[0]) or 1.0; fh = (fb[3] - fb[1]) or 1.0; bw = bbx[2] - bbx[0]; bh = bbx[3] - bbx[1]
         mir = lambda p: (bbx[0] + (1 - (p[0] - fb[0]) / fw) * bw, bbx[1] + (p[1] - fb[1]) / fh * bh)
         back_arcs = [(col, [mir(p) for p in pts]) for col, pts in front_arcs]
-        pieces.append(("seam_match_back", [_arc_paths(back_arcs, "seam_back")]))
+        pieces.append(("seam_match_back", [_arc_paths(back_arcs, bk["poly"], "seam_back")]))
 
     # БОКОВИНЫ (цвет + контур + припуск [+ отверстие руки])
     for s in lay["strips"]:
