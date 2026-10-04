@@ -110,6 +110,34 @@ def _flat(dd, nn=8):
     return subs
 
 
+def posterize_arr(arr, ncolors=64):
+    """Плоская упрощённая версия растра: квантование -> группы по тону+полосе насыщенности ->
+    доминирующий по площади цвет группы (тени сливаются в основной); near-чёрный=контур, S<0.1=белый.
+    Один основной цвет на участок. Возвращает uint8 HxWx3."""
+    from PIL import Image
+    im = Image.fromarray(arr).convert("RGB")
+    q = im.quantize(colors=ncolors, method=Image.MEDIANCUT)
+    pal = np.array(q.getpalette()[:ncolors * 3]).reshape(-1, 3)
+    lbl = np.array(q); counts = np.bincount(lbl.ravel(), minlength=ncolors)
+
+    def cls(c):
+        h, s, v = colorsys.rgb_to_hsv(*[x / 255.0 for x in c])
+        if v < 0.22:
+            return "K"
+        if s < 0.10:
+            return "W" if v > 0.85 else "G"
+        return f"H{int(h * 360) // 18}_{0 if s < 0.38 else 1}"
+    groups = {}
+    for i, c in enumerate(pal):
+        groups.setdefault(cls(c), []).append(i)
+    rep = {}
+    for g, idxs in groups.items():
+        rep[g] = (15, 15, 15) if g == "K" else (255, 255, 255) if g == "W" else \
+            tuple(int(x) for x in pal[max(idxs, key=lambda i: counts[i])])
+    newpal = np.array([rep[cls(c)] for c in pal], dtype=np.uint8)
+    return newpal[lbl].astype(np.uint8)
+
+
 def front_raster(page, front_drawings_fn, zoom=2.0, mg=6):
     """Реконструкция переда из векторных заливок в растр (pt-координаты).
     Возвращает (arr, bx0, by0, Z, mg). zoom=2 достаточно для сэмпла доминирующих цветов
@@ -138,7 +166,10 @@ def front_raster(page, front_drawings_fn, zoom=2.0, mg=6):
                 dr.polygon(pts, fill=f)
             if s is not None:
                 dr.line(pts + ([pts[0]] if len(pts) >= 3 else []), fill=s, width=max(1, int(dd.get("width", 0.5) * Z)))
-    out = (np.asarray(img), bx0, by0, Z, mg)
+    raw = np.asarray(img)
+    if getattr(page, "_flat_colors", False):                        # боковины/днище из плоского варианта
+        raw = posterize_arr(raw)
+    out = (raw, bx0, by0, Z, mg)
     page._raster_cache = ((zoom, mg), out)
     return out
 

@@ -88,6 +88,8 @@ def build_layout(page, cfg):
     from sides import smooth_front
     if not getattr(page, "_gd_cached", False):                       # кэш get_drawings на весь прогон
         _gd = page.get_drawings(); page.get_drawings = lambda *a, **k: _gd; page._gd_cached = True
+    if cfg.get("flat_colors"):                                       # боковины/днище красить из плоского варианта
+        page._flat_colors = True
     fig = get_front_figure(page, cfg)
 
     cut_arms = []                                                # отрезанные руки (PT-контуры) — режем ДО раскладки
