@@ -1073,13 +1073,24 @@ def _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip, cfg):
         if lo <= s <= hi and d > best:
             best = d; elbow_s = s
     white = (255, 255, 255)
-    N = max(8, int(L / cfg.get("arm_band_step_pt", 10)))             # тонкие срезы вдоль оси
+    base = arm_zone_color(page, arm_poly, wmid, u, 0.0, L) or white   # базовый цвет руки (скафандр/кожа)
+    base = tuple(int(v) for v in base)
+    N = max(16, int(L / cfg.get("arm_band_step_pt", 5)))              # МЕЛКИЕ срезы — ловим тонкую повязку
     raw = []
     for k in range(N):
-        c = arm_zone_color(page, arm_poly, wmid, u, L * k / N, L * (k + 1) / N) or white
+        c = arm_zone_color(page, arm_poly, wmid, u, L * k / N, L * (k + 1) / N) or base
         raw.append((k / N, (k + 1) / N, tuple(int(v) for v in c)))
-    bands = _merge_small_bands(_simplify_bands(raw, white, cfg.get("hue_merge_deg", 25.0)),
-                               cfg.get("arm_band_merge_frac", 0.05))
+    simp = _simplify_bands(raw, base, cfg.get("hue_merge_deg", 25.0))
+    # ЛОГИКА ПОВЯЗКИ: базовый фон сливаем, НЕ-базовые полосы (повязки) сохраняем даже тонкими
+    tol = cfg.get("arm_band_base_tol", 48)
+    is_base = lambda c: sum(abs(int(a) - int(b)) for a, b in zip(c, base)) <= tol
+    bands = []
+    for f0, f1, c in simp:
+        cc = base if is_base(c) else tuple(c)
+        if bands and tuple(bands[-1][2]) == cc:
+            bands[-1] = (bands[-1][0], f1, cc)
+        else:
+            bands.append((f0, f1, cc))
     ef = max(0.05, min(0.95, elbow_s / L))
 
     def rescale(a, b):
