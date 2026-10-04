@@ -60,3 +60,4 @@ armpit_refine_aspect_relax: 0.7
 arm_template: true
 accent_sat_min: 0.15
 band_merge_small_frac: 0.12
+arm_texture_bands: true

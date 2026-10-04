@@ -1034,6 +1034,13 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg):
         plec["fill"] = sh_color
         baza["fill"] = sh_color
 
+    if cfg.get("arm_texture_bands"):                                 # полосы текстуры вдоль руки (как боковины)
+        fore_bands, sh_bands = _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip_used, cfg)
+        if fore_bands:
+            pred["bands"] = fore_bands
+        if sh_bands:
+            plec["bands"] = sh_bands
+
     hole_d = cfg.get("arm_hole_diameter_mm", 250)
     hole_c = math.pi * hole_d
     diag = {
@@ -1044,6 +1051,45 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg):
         "elbow": elbow_cut, "fore_color": fore_color, "sh_color": sh_color,
     }
     return {"pieces": pieces, "hand": hand, "diag": diag}
+
+
+def _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip, cfg):
+    """Полосы текстуры вдоль руки (как у боковин): вдоль оси запястье->подмышка берём
+    доминирующий цвет в тонких срезах, сливаем похожие (hue) и схлопываем мелочь. Делим
+    по локтю: предплечье [запястье..локоть] и плечо [локоть..подмышка]. Возвращает
+    (fore_bands, sh_bands) — списки (f0,f1,(r,g,b)), f=0 у запястья/локтя соответственно."""
+    from side_color import arm_zone_color, _simplify_bands, _merge_small_bands
+    wmid = (np.asarray(wrist[0], float) + np.asarray(wrist[1], float)) / 2.0
+    tip = np.asarray(tip, float)
+    far = arm_arr[int(np.argmax(np.hypot(arm_arr[:, 0] - tip[0], arm_arr[:, 1] - tip[1])))]
+    u = far - wmid; L = float(np.hypot(*u))
+    if L < 1e-6:
+        return None, None
+    u = u / L
+    lo = cfg.get("elbow_search_lo_frac", 0.20) * L; hi = cfg.get("elbow_search_hi_frac", 0.85) * L
+    min_d = cfg.get("elbow_min_depth_frac", 0.08) * L; elbow_s = 0.5 * L; best = min_d
+    for p, d in _contour_notches(arm_arr):
+        s = float((np.asarray(p, float) - wmid) @ u)
+        if lo <= s <= hi and d > best:
+            best = d; elbow_s = s
+    white = (255, 255, 255)
+    N = max(8, int(L / cfg.get("arm_band_step_pt", 10)))             # тонкие срезы вдоль оси
+    raw = []
+    for k in range(N):
+        c = arm_zone_color(page, arm_poly, wmid, u, L * k / N, L * (k + 1) / N) or white
+        raw.append((k / N, (k + 1) / N, tuple(int(v) for v in c)))
+    bands = _merge_small_bands(_simplify_bands(raw, white, cfg.get("hue_merge_deg", 25.0)),
+                               cfg.get("arm_band_merge_frac", 0.05))
+    ef = max(0.05, min(0.95, elbow_s / L))
+
+    def rescale(a, b):
+        out = []
+        for f0, f1, c in bands:
+            x0, x1 = max(f0, a), min(f1, b)
+            if x1 > x0:
+                out.append(((x0 - a) / (b - a), (x1 - a) / (b - a), c))
+        return out or None
+    return rescale(0.0, ef), rescale(ef, 1.0)
 
 
 def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg):

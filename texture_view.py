@@ -170,11 +170,22 @@ def main():
         dr.ellipse([T(ah["cx"] - ah["r"], ah["cy"] - ah["r"]), T(ah["cx"] + ah["r"], ah["cy"] + ah["r"])],
                    outline=(220, 0, 0), width=lw)
 
-    # ----- РУКА (база/плечо/предплечье) — цвет своей зоны (предплечье/плечо с 2D) + подпись -----
+    # ----- РУКА (база/плечо/предплечье) — цвет зоны, либо ПОЛОСЫ текстуры вдоль руки + подпись -----
     for ap in lay.get("arm_pieces", []):
-        dr.polygon([T(x, y) for x, y in ap["poly"].exterior.coords],
-                   fill=tuple(ap.get("fill", arm_col)), outline=(150, 0, 150))
-        label(ap["poly"], lbl(ap.get("name", "")))
+        poly = ap["poly"]; bands = ap.get("bands")
+        if bands:                                                    # полосы (как боковины): заливка + горизонт. зоны
+            b = poly.bounds; y0 = b[1]; hpx = b[3] - b[1]
+            mask = Image.new("L", im.size, 0)
+            ImageDraw.Draw(mask).polygon([T(x, y) for x, y in poly.exterior.coords], fill=255)
+            layer = Image.new("RGB", im.size, tuple(ap.get("fill", arm_col))); ld = ImageDraw.Draw(layer)
+            for f0, f1, c in bands:                                  # f=0 у верхнего ребра детали
+                ld.rectangle([T(b[0], y0 + hpx * f0), T(b[2], y0 + hpx * f1)], fill=tuple(c))
+            im.paste(layer, (0, 0), mask)
+            dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(150, 0, 150), width=lw)
+        else:
+            dr.polygon([T(x, y) for x, y in poly.exterior.coords],
+                       fill=tuple(ap.get("fill", arm_col)), outline=(150, 0, 150))
+        label(poly, lbl(ap.get("name", "")))
 
     # ----- КИСТЬ: текстура жёстко привязана к контуру через аффин src(pt)->poly(раскладка) -----
     all_dds = [dd for dd in page.get_drawings()
