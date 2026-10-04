@@ -124,8 +124,8 @@ def posterize_arr(arr, ncolors=64):
         h, s, v = colorsys.rgb_to_hsv(*[x / 255.0 for x in c])
         if v < 0.22:
             return "K"
-        if s < 0.10:
-            return "W" if v > 0.85 else "G"
+        if s < 0.06:                                                # только ЧИСТО белый/серый; светлый беж -> цвет
+            return "W" if v > 0.90 else "G"
         return f"H{int(h * 360) // 18}_{0 if s < 0.38 else 1}"
     groups = {}
     for i, c in enumerate(pal):
@@ -308,6 +308,19 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
         n = n / nn
         if not contour_mm.contains(Point(p + n * 2.0)):             # внутрь силуэта
             n = -n
+        if getattr(page, "_flat_colors", False):                    # flat: ДОМИНИРУЮЩИЙ цвет в окне внутрь
+            from collections import Counter                         # (тонкий белый блик края не победит основной)
+            win = cfg.get("flat_sample_window_mm", 18.0)
+            cols = []
+            d = 1.0
+            while d <= min(skip_max, win):
+                c = px_mm(*(p + n * d))
+                if not is_dark(c):
+                    cols.append(tuple(int(v) for v in c))
+                d += step_mm
+            if cols:
+                return Counter(cols).most_common(1)[0][0], True
+            return fallback, False
         d, last = 1.0, None
         while d <= skip_max:
             c = px_mm(*(p + n * d))
