@@ -1053,6 +1053,59 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg):
     return {"pieces": pieces, "hand": hand, "diag": diag}
 
 
+def _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg):
+    """Локоть вдоль оси (s от запястья): сперва глубочайшая ВОГНУТОСТЬ контура в полосе; если
+    её нет (плавный сгиб, напр. скафандр) — по ИЗГИБУ осевой линии (скелет). Возвращает
+    (elbow_s, elbow_point|None). Если ничего — (0.5*L, None)."""
+    lo = cfg.get("elbow_search_lo_frac", 0.20) * L
+    hi = cfg.get("elbow_search_hi_frac", 0.85) * L
+    min_d = cfg.get("elbow_min_depth_frac", 0.08) * L
+    best = min_d; es = None; ep = None
+    for p, d in _contour_notches(arm_arr):
+        s = float((np.asarray(p, float) - wmid) @ u)
+        if lo <= s <= hi and d > best:
+            best = d; es = s; ep = np.asarray(p, float)
+    if es is not None:
+        return es, ep
+    # фолбэк: изгиб осевой линии (скелет)
+    try:
+        from skimage.morphology import skeletonize
+        mnx, mny = arm_arr[:, 0].min(), arm_arr[:, 1].min()
+        W = int(arm_arr[:, 0].max() - mnx) + 10; H = int(arm_arr[:, 1].max() - mny) + 10
+        mask = np.zeros((H, W), np.uint8)
+        cv2.fillPoly(mask, [(arm_arr - [mnx, mny] + 5).astype(np.int32)], 1)
+        sk = skeletonize(mask > 0); ys, xs = np.where(sk)
+        P = np.c_[xs, ys].astype(float) + [mnx - 5, mny - 5]
+        if len(P) >= 6:
+            far_pt = np.asarray(wmid, float) + u * L                 # конец у плеча/подмышки
+            tips = np.array([p for p in P if np.sum(np.hypot(P[:, 0] - p[0], P[:, 1] - p[1]) < 2.5) <= 2])
+            cand = tips if len(tips) else P
+            start = cand[int(np.argmin(np.hypot(cand[:, 0] - far_pt[0], cand[:, 1] - far_pt[1])))]  # старт с КОНЦА
+            order, used, cur = [start], {tuple(start)}, start
+            for _ in range(len(P)):
+                rem = np.array([p for p in P if tuple(p) not in used])
+                if not len(rem):
+                    break
+                d = np.hypot(rem[:, 0] - cur[0], rem[:, 1] - cur[1])
+                if d.min() > 8:
+                    break
+                cur = rem[int(np.argmin(d))]; order.append(cur); used.add(tuple(cur))
+            order = np.array(order)
+            if len(order) >= 6:
+                w = max(3, len(order) // 8); best_a = 0.0; bi = None
+                for i in range(w, len(order) - w):
+                    v1 = order[i] - order[i - w]; v2 = order[i + w] - order[i]
+                    ang = math.acos(np.clip(v1 @ v2 / (np.hypot(*v1) * np.hypot(*v2) + 1e-9), -1, 1))
+                    s = float((order[i] - wmid) @ u)
+                    if ang > best_a and lo <= s <= hi:
+                        best_a = ang; bi = i
+                if bi is not None and best_a >= math.radians(cfg.get("elbow_bend_min_deg", 20)):
+                    ep = order[bi]; return float((ep - wmid) @ u), ep
+    except Exception:
+        pass
+    return 0.5 * L, None
+
+
 def _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip, cfg):
     """Полосы текстуры вдоль руки (как у боковин): вдоль оси запястье->подмышка берём
     доминирующий цвет в тонких срезах, сливаем похожие (hue) и схлопываем мелочь. Делим
@@ -1066,12 +1119,7 @@ def _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip, cfg):
     if L < 1e-6:
         return None, None
     u = u / L
-    lo = cfg.get("elbow_search_lo_frac", 0.20) * L; hi = cfg.get("elbow_search_hi_frac", 0.85) * L
-    min_d = cfg.get("elbow_min_depth_frac", 0.08) * L; elbow_s = 0.5 * L; best = min_d
-    for p, d in _contour_notches(arm_arr):
-        s = float((np.asarray(p, float) - wmid) @ u)
-        if lo <= s <= hi and d > best:
-            best = d; elbow_s = s
+    elbow_s, _ep = _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg)
     white = (255, 255, 255)
     base = arm_zone_color(page, arm_poly, wmid, u, 0.0, L) or white   # базовый цвет руки (скафандр/кожа)
     base = tuple(int(v) for v in base)
@@ -1115,14 +1163,7 @@ def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg):
     if L < 1e-6:
         return None, None, None
     u = u / L
-    lo = cfg.get("elbow_search_lo_frac", 0.20) * L
-    hi = cfg.get("elbow_search_hi_frac", 0.85) * L
-    min_d = cfg.get("elbow_min_depth_frac", 0.08) * L
-    elbow_s, elbow_p, best = 0.5 * L, None, min_d                   # дефолт — середина оси
-    for p, d in _contour_notches(arm_arr):
-        s = float((np.asarray(p, float) - wmid) @ u)
-        if lo <= s <= hi and d > best:
-            best = d; elbow_s = s; elbow_p = np.asarray(p, float)
+    elbow_s, elbow_p = _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg)  # вогнутость или изгиб скелета
     fore = arm_zone_color(page, arm_poly, wmid, u, 0.0, elbow_s)     # запястье..локоть = предплечье
     sh = arm_zone_color(page, arm_poly, wmid, u, elbow_s, L + 1e6)   # локоть..подмышка = плечо
     elbow_chord = None
