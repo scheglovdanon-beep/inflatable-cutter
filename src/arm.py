@@ -1151,20 +1151,25 @@ def _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip, cfg):
     return rescale(0.0, ef), rescale(ef, 1.0)
 
 
-def _snap_outer_corner(arm_poly, arm_arr, pt, L, cfg):
-    """Привязать точку к ближайшему ОСТРОМУ ВЫПУКЛОМУ углу контура (внешний угол локтя).
-    Если рядом нет выпуклого угла (внутренняя/гладкая сторона) — вернуть pt без изменений."""
-    pt = np.asarray(pt, float)
+def _elbow_top_crease(arm_poly, arm_arr, wmid, u, ep, other, L, cfg):
+    """Верхний угол локтя = ВЫПУКЛЫЙ угол верхнего ребра, БЛИЖАЙШИЙ к центру сгиба `ep`
+    (точке скелета), на стороне, ПРОТИВОПОЛОЖНОЙ нижней точке `other`. Если не нашли — None."""
     try:
         ccw = arm_poly.exterior.is_ccw
     except Exception:
         ccw = True
     N = len(arm_arr); w = max(2, N // 50)
+    es = (ep[0] - wmid[0]) * u[0] + (ep[1] - wmid[1]) * u[1]
     R = cfg.get("elbow_corner_r_frac", 0.22) * L
-    best = None; best_ang = math.radians(cfg.get("elbow_corner_min_deg", 28))
+    min_ang = math.radians(cfg.get("elbow_corner_min_deg", 40))
+    side_o = math.copysign(1.0, u[0] * (other[1] - wmid[1]) - u[1] * (other[0] - wmid[0]))
+    best = None; best_dist = 1e18
     for i in range(N):
-        p = arm_arr[i]
-        if math.hypot(p[0] - pt[0], p[1] - pt[1]) > R:
+        p = arm_arr[i]; s = (p[0] - wmid[0]) * u[0] + (p[1] - wmid[1]) * u[1]
+        if abs(s - es) > R:
+            continue
+        side_p = math.copysign(1.0, u[0] * (p[1] - wmid[1]) - u[1] * (p[0] - wmid[0]))
+        if side_p == side_o:
             continue
         a0 = arm_arr[(i - w) % N]; b0 = arm_arr[(i + w) % N]
         v1 = p - a0; v2 = b0 - p
@@ -1174,9 +1179,10 @@ def _snap_outer_corner(arm_poly, arm_arr, pt, L, cfg):
         cr = v1[0] * v2[1] - v1[1] * v2[0]
         convex = (cr > 0) if ccw else (cr < 0)
         ang = math.acos(max(-1.0, min(1.0, (v1 @ v2) / (n1 * n2))))
-        if convex and ang > best_ang:
-            best_ang = ang; best = np.asarray(p, float)
-    return best if best is not None else pt
+        d = math.hypot(p[0] - ep[0], p[1] - ep[1])                  # ближайший к центру сгиба
+        if convex and ang > min_ang and d < best_dist:
+            best_dist = d; best = np.asarray(p, float)
+    return best
 
 
 def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg):
@@ -1198,9 +1204,14 @@ def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg):
     if elbow_p is not None:
         ch = _perp_chord(arm_poly, elbow_p, u)
         if ch is not None:
-            e0 = _snap_outer_corner(arm_poly, arm_arr, ch[0], L, cfg)  # верх -> выпуклый угол локтя
-            e1 = _snap_outer_corner(arm_poly, arm_arr, ch[1], L, cfg)  # низ (внутр.) обычно без угла -> как есть
-            elbow_chord = (tuple(e0), tuple(e1))
+            A = np.asarray(ch[0], float); B = np.asarray(ch[1], float)
+            ep = elbow_p if elbow_p is not None else (wmid + u * elbow_s)
+            top = _elbow_top_crease(arm_poly, arm_arr, wmid, u, ep, B, L, cfg)  # выпуклый угол напротив низа B
+            if top is not None:
+                elbow_chord = (tuple(top), tuple(B))
+            else:
+                top = _elbow_top_crease(arm_poly, arm_arr, wmid, u, ep, A, L, cfg)
+                elbow_chord = (tuple(top), tuple(A)) if top is not None else (tuple(A), tuple(B))
     return elbow_chord, fore, sh
 
 
