@@ -1053,6 +1053,46 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg):
     return {"pieces": pieces, "hand": hand, "diag": diag}
 
 
+def _elbow_color_s(page, arm_poly, wmid, u, L, cfg):
+    """Локоть по ЦВЕТОВОМУ ПЕРЕХОДУ: в перпендикулярных срезах берём ДОМИНИРУЮЩИЙ цвет (по
+    всей ширине руки); где доминанта резко флипает (рукав<->кожа = манжет), там локоть.
+    Надёжнее осевой линии на согнутой руке. Возвращает axial s или None (однотонная)."""
+    from side_color import front_raster
+    from sides import front_drawings
+    from collections import Counter
+    img, bx0, by0, Z, mg = front_raster(page, front_drawings)
+    H, W = img.shape[:2]
+    wmid = np.asarray(wmid, float); u = np.asarray(u, float)
+
+    def colat(p):
+        px = int((p[0] - bx0 + mg) * Z); py = int((p[1] - by0 + mg) * Z)
+        return tuple(int(v) for v in img[min(H - 1, max(0, py)), min(W - 1, max(0, px))])
+    N = max(16, int(L / cfg.get("arm_band_step_pt", 6)))
+    prof = []
+    for k in range(N):
+        s = L * (k + 0.5) / N; p = wmid + u * s
+        ch = _perp_chord(arm_poly, p, u)
+        if ch is None:
+            prof.append(None); continue
+        a = np.asarray(ch[0], float); b = np.asarray(ch[1], float)
+        cols = [colat(a + (b - a) * t) for t in np.linspace(0.15, 0.85, 9)]  # по ширине среза
+        cols = [c for c in cols if sum(c) >= 60]                     # без контура/тени
+        prof.append(Counter(cols).most_common(1)[0][0] if cols else None)
+    lo = cfg.get("elbow_search_lo_frac", 0.20) * L
+    hi = cfg.get("elbow_search_hi_frac", 0.85) * L
+    best = None; bestd = cfg.get("elbow_color_min_diff", 90)
+    for k in range(1, N):
+        if prof[k] is None or prof[k - 1] is None:
+            continue
+        s = L * k / N
+        if not (lo <= s <= hi):
+            continue
+        diff = sum(abs(prof[k][j] - prof[k - 1][j]) for j in range(3))
+        if diff > bestd:
+            bestd = diff; best = s
+    return best
+
+
 def _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg):
     """Локоть вдоль оси (s от запястья): сперва глубочайшая ВОГНУТОСТЬ контура в полосе; если
     её нет (плавный сгиб, напр. скафандр) — по ИЗГИБУ осевой линии (скелет). Возвращает
@@ -1119,7 +1159,8 @@ def _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip, cfg):
     if L < 1e-6:
         return None, None
     u = u / L
-    elbow_s, _ep = _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg)
+    esc = _elbow_color_s(page, arm_poly, wmid, u, L, cfg)            # локоть по цветовому переходу, иначе геометрия
+    elbow_s = esc if esc is not None else _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg)[0]
     white = (255, 255, 255)
     base = arm_zone_color(page, arm_poly, wmid, u, 0.0, L) or white   # базовый цвет руки (скафандр/кожа)
     base = tuple(int(v) for v in base)
@@ -1185,6 +1226,51 @@ def _elbow_top_crease(arm_poly, arm_arr, wmid, u, ep, other, L, cfg):
     return best
 
 
+def _elbow_by_color_edges(page, arm_poly, arm_arr, wrist, tip, cfg):
+    """Локоть по ЦВЕТОВОЙ ГРАНИЦЕ рукав<->кожа на ДВУХ рёбрах руки: идём по верхнему и нижнему
+    ребру от запястья к подмышке, пробуем цвет чуть внутрь; концы реза = точки, где цвет
+    переключается кожа->рукав. Возвращает (pt_top, pt_bot) или None (однотонная рука)."""
+    from side_color import front_raster
+    from sides import front_drawings
+    img, bx0, by0, Z, mg = front_raster(page, front_drawings)
+    H, W = img.shape[:2]
+    cen = np.array([arm_poly.centroid.x, arm_poly.centroid.y])
+
+    def colat(p):
+        px = int((p[0] - bx0 + mg) * Z); py = int((p[1] - by0 + mg) * Z)
+        return img[min(H - 1, max(0, py)), min(W - 1, max(0, px))].astype(int)
+
+    def inward_col(p):
+        n = cen - p; nn = np.hypot(*n)
+        return colat(p + n / nn * 8.0) if nn > 1e-6 else colat(p)
+
+    wmid = (np.asarray(wrist[0], float) + np.asarray(wrist[1], float)) / 2.0
+    _, rest = cut_arm(arm_arr, wrist, tip)                           # цепочка T..подмышка..B (без кисти)
+    rest = np.asarray(rest, float)
+    if len(rest) < 8:
+        return None
+    far_i = int(np.argmax(np.hypot(rest[:, 0] - wmid[0], rest[:, 1] - wmid[1])))
+
+    def edge_transition(chain):                                     # chain: от запястья к подмышке
+        if len(chain) < 4:
+            return None
+        cols = [inward_col(p) for p in chain]
+        fore = np.median(cols[:max(2, len(cols) // 6)], axis=0)     # у запястья (кожа)
+        sh = np.median(cols[-max(2, len(cols) // 6):], axis=0)      # у подмышки (рукав)
+        if sum(abs(fore - sh)) < cfg.get("elbow_color_min_diff", 90):
+            return None                                            # однотонное ребро
+        for i in range(len(cols)):
+            if sum(abs(cols[i] - sh)) < sum(abs(cols[i] - fore)):  # переключился на рукав
+                return np.asarray(chain[i], float)
+        return None
+
+    top = edge_transition(rest[:far_i + 1])                         # ребро T->подмышка
+    bot = edge_transition(rest[far_i:][::-1])                       # ребро B->подмышка
+    if top is not None and bot is not None:
+        return (tuple(top), tuple(bot))
+    return None
+
+
 def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg):
     """Локоть = самая глубокая вогнутость контура руки в осевой полосе между запястьем и
     подмышкой. Делит руку на предплечье (запястье..локоть) и плечо (локоть..подмышка);
@@ -1197,20 +1283,23 @@ def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg):
     if L < 1e-6:
         return None, None, None
     u = u / L
-    elbow_s, elbow_p = _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg)  # вогнутость или изгиб скелета
-    fore = arm_zone_color(page, arm_poly, wmid, u, 0.0, elbow_s)     # запястье..локоть = предплечье
-    sh = arm_zone_color(page, arm_poly, wmid, u, elbow_s, L + 1e6)   # локоть..подмышка = плечо
+    esc = _elbow_color_s(page, arm_poly, wmid, u, L, cfg)            # 1) цветовой переход рукав<->кожа (манжет)
+    if esc is not None:
+        elbow_s, elbow_p = esc, (wmid + u * esc)
+    else:
+        elbow_s, elbow_p = _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg)  # 2) вогнутость/изгиб скелета
+    fore = arm_zone_color(page, arm_poly, wmid, u, 0.0, elbow_s)
+    sh = arm_zone_color(page, arm_poly, wmid, u, elbow_s, L + 1e6)
     elbow_chord = None
     if elbow_p is not None:
         ch = _perp_chord(arm_poly, elbow_p, u)
         if ch is not None:
             A = np.asarray(ch[0], float); B = np.asarray(ch[1], float)
-            ep = elbow_p if elbow_p is not None else (wmid + u * elbow_s)
-            top = _elbow_top_crease(arm_poly, arm_arr, wmid, u, ep, B, L, cfg)  # выпуклый угол напротив низа B
+            top = _elbow_top_crease(arm_poly, arm_arr, wmid, u, elbow_p, B, L, cfg)
             if top is not None:
                 elbow_chord = (tuple(top), tuple(B))
             else:
-                top = _elbow_top_crease(arm_poly, arm_arr, wmid, u, ep, A, L, cfg)
+                top = _elbow_top_crease(arm_poly, arm_arr, wmid, u, elbow_p, A, L, cfg)
                 elbow_chord = (tuple(top), tuple(A)) if top is not None else (tuple(A), tuple(B))
     return elbow_chord, fore, sh
 
