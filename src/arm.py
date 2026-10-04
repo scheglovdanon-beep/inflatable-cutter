@@ -1151,6 +1151,34 @@ def _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip, cfg):
     return rescale(0.0, ef), rescale(ef, 1.0)
 
 
+def _snap_outer_corner(arm_poly, arm_arr, pt, L, cfg):
+    """Привязать точку к ближайшему ОСТРОМУ ВЫПУКЛОМУ углу контура (внешний угол локтя).
+    Если рядом нет выпуклого угла (внутренняя/гладкая сторона) — вернуть pt без изменений."""
+    pt = np.asarray(pt, float)
+    try:
+        ccw = arm_poly.exterior.is_ccw
+    except Exception:
+        ccw = True
+    N = len(arm_arr); w = max(2, N // 50)
+    R = cfg.get("elbow_corner_r_frac", 0.22) * L
+    best = None; best_ang = math.radians(cfg.get("elbow_corner_min_deg", 28))
+    for i in range(N):
+        p = arm_arr[i]
+        if math.hypot(p[0] - pt[0], p[1] - pt[1]) > R:
+            continue
+        a0 = arm_arr[(i - w) % N]; b0 = arm_arr[(i + w) % N]
+        v1 = p - a0; v2 = b0 - p
+        n1 = math.hypot(*v1); n2 = math.hypot(*v2)
+        if n1 < 1e-6 or n2 < 1e-6:
+            continue
+        cr = v1[0] * v2[1] - v1[1] * v2[0]
+        convex = (cr > 0) if ccw else (cr < 0)
+        ang = math.acos(max(-1.0, min(1.0, (v1 @ v2) / (n1 * n2))))
+        if convex and ang > best_ang:
+            best_ang = ang; best = np.asarray(p, float)
+    return best if best is not None else pt
+
+
 def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg):
     """Локоть = самая глубокая вогнутость контура руки в осевой полосе между запястьем и
     подмышкой. Делит руку на предплечье (запястье..локоть) и плечо (локоть..подмышка);
@@ -1169,7 +1197,10 @@ def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg):
     elbow_chord = None
     if elbow_p is not None:
         ch = _perp_chord(arm_poly, elbow_p, u)
-        elbow_chord = (tuple(ch[0]), tuple(ch[1])) if ch is not None else None
+        if ch is not None:
+            e0 = _snap_outer_corner(arm_poly, arm_arr, ch[0], L, cfg)  # верх -> выпуклый угол локтя
+            e1 = _snap_outer_corner(arm_poly, arm_arr, ch[1], L, cfg)  # низ (внутр.) обычно без угла -> как есть
+            elbow_chord = (tuple(e0), tuple(e1))
     return elbow_chord, fore, sh
 
 
