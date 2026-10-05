@@ -216,6 +216,23 @@ def main():
     # сборка: каждая запись pieces -> отдельный Form XObject (= группа в Corel)
     hdr = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.2f}mm" height="{H:.2f}mm" '
            f'viewBox="0 0 {W:.2f} {H:.2f}">')
+
+    if args.out.lower().endswith(".svg"):                             # SVG: каждая деталь = <g id=..> (НАСТОЯЩАЯ
+        def _gid(n):                                                  # группа; Corel сохраняет при переводе в кривые)
+            return "".join(c if (c.isalnum() or c in "_-") else "_" for c in n)
+        out = [hdr, f'<rect width="{W:.2f}" height="{H:.2f}" fill="white"/>']
+        for name, body in pieces:
+            out.append(f'<g id="{_gid(name)}">')
+            out.extend(body)
+            out.append("</g>")
+        out.append("</svg>")
+        open(args.out, "w", encoding="utf-8").write("\n".join(out))
+        sz = os.path.getsize(args.out) / 1024
+        print(f"saved {args.out} | групп <g>: {len(pieces)} | лист {W:.0f}x{H:.0f} мм | {sz:.0f} KB")
+        for nm, _ in pieces:
+            print("   группа:", nm)
+        return
+
     master = pymupdf.open(); mpage = master.new_page(width=W * MM2PT, height=H * MM2PT)
     mpage.draw_rect(mpage.rect, color=None, fill=(1, 1, 1))
     # каждая деталь -> свой слой (PDF OCG) с именем детали: Corel импортирует деталь ЦЕЛИКОМ
