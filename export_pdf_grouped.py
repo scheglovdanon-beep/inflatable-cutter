@@ -217,6 +217,83 @@ def _instruction(pieces, lay, W, H, x0, y0, scale, font_mm):
     return out
 
 
+def _bbox_for(name, lay):
+    """bbox детали (с припуском, если есть) в координатах раскладки — для рулонной упаковки."""
+    from shapely.geometry import Polygon as _P, box as _bx
+    if name == "front":
+        return (lay.get("front_seam") or lay["front"]).bounds
+    if name == "back" and lay.get("back"):
+        bk = lay["back"]; return (bk.get("seam") or bk["poly"]).bounds
+    if name.startswith("bokovina_"):
+        i = int(name.split("_")[1])
+        for s in lay.get("strips", []):
+            if s["i"] == i:
+                return (s.get("seam") or _P(s["poly"])).bounds
+    if name.startswith("kist_"):
+        nm = name[5:]
+        for p in lay.get("hand_pieces", []):
+            if str(p.get("name")) == nm:
+                return (p.get("seam") or p["poly"]).bounds
+    if name.startswith("ruka_"):
+        nm = name[5:]
+        for p in lay.get("arm_pieces", []):
+            if str(p.get("name")) == nm:
+                return (p.get("seam") or p["poly"]).bounds
+    if name == "zapasnaya_ruka":
+        xs, ys = [], []
+        for p in lay.get("spare_arm", []):
+            b = (p.get("seam") or p["poly"]).bounds; xs += [b[0], b[2]]; ys += [b[1], b[3]]
+        return (min(xs), min(ys), max(xs), max(ys)) if xs else None
+    if name == "dnishe" and lay.get("base"):
+        b = lay["base"]; return (b.get("dnishe_seam") or b["dnishe"]).bounds
+    if name == "nozhka" and lay.get("base"):
+        b = lay["base"]; lx, ly, lw, lh = b["leg"]
+        return (b.get("leg_seam") or _bx(lx, ly, lx + lw, ly + lh)).bounds
+    return None
+
+
+def _rollpack_svg(parts, roll_h, gap, lay, y_off=0.0, suffix="_печать", inst=None, inst_bbox=None):
+    """КОПИЯ всех деталей (+ инструкция), компактно упакованная в РУЛОН высотой roll_h
+    (ширина мин.), повороты разрешены — это САМА ПЕЧАТЬ. Размещается со смещением вниз (y_off),
+    т.е. НИЖЕ фигуры. Детали-копии двигаются SVG-трансформом. Возвращает (pieces_копии, ширина)."""
+    from rectpack import newPacker, MaxRectsBaf, SORT_AREA
+    boxes = {}
+    for i, (name, _b) in enumerate(parts):
+        b = _bbox_for(name, lay)
+        if b is not None:
+            boxes[i] = b
+    packer = newPacker(rotation=True, pack_algo=MaxRectsBaf, sort_algo=SORT_AREA)
+    tot = sum((boxes[i][2] - boxes[i][0] + gap) for i in boxes)
+    for i in boxes:
+        x0, y0, x1, y1 = boxes[i]; packer.add_rect(x1 - x0 + gap, y1 - y0 + gap, rid=i)
+    packer.add_bin(tot + gap, roll_h); packer.pack()
+    placed = {}
+    for b in packer:
+        for r in b:
+            placed[r.rid] = (r.x, r.y, r.width, r.height)
+    gy = f'translate(0,{y_off:.3f}) '                                  # весь рулон — ниже фигуры
+    out, maxx = [], 0.0
+    for i, (name, body) in enumerate(parts):
+        if i not in placed:
+            continue
+        x0, y0, x1, y1 = boxes[i]; px, py, pw, ph = placed[i]
+        if abs(pw - ((x1 - x0) + gap)) > 1.0:                          # повёрнут на 90°
+            tf = f'matrix(0,1,-1,0,{px + gap / 2 + y1:.3f},{py + gap / 2 - x0:.3f})'
+        else:
+            tf = f'translate({px + gap / 2 - x0:.3f},{py + gap / 2 - y0:.3f})'
+        out.append((name + suffix, [f'<g transform="{gy}{tf}">'] + body + ["</g>"]))
+        maxx = max(maxx, px + pw)
+    W = maxx + gap
+    if inst is not None and inst_bbox is not None:                     # инструкция — в конце рулона, без поворота
+        ix0, iy0, ix1, iy1 = inst_bbox
+        tf = f'translate({W + gap - ix0:.3f},{gap - iy0:.3f})'
+        out.append((inst[0] + suffix, [f'<g transform="{gy}{tf}">'] + inst[1] + ["</g>"]))
+        W = W + gap + (ix1 - ix0) + gap
+    out.insert(0, (f"rulon_{int(roll_h)}mm",
+                   [f'<rect x="0" y="{y_off:.2f}" width="{W:.2f}" height="{roll_h:.2f}" fill="none" stroke="#888" stroke-width="1.5"/>']))
+    return out, W
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("input_pdf")
     ap.add_argument("--config", default="config.yaml"); ap.add_argument("-o", "--out", default="out/layout_grouped.pdf")
@@ -410,16 +487,29 @@ def main():
         pieces.append(("nozhka", lb))
 
     # ИНСТРУКЦИЯ ПО СБОРКЕ: копия всех деталей, уменьшенная в прямоугольник шириной 30 см,
-    # рядом справа, с русскими подписями каждой детали. Расширяем лист вправо.
+    # с русскими подписями. Готовим её контент (кладём либо рядом, либо в рулон печати).
+    inst = None; inst_bbox = None
     if cfg.get("assembly_instruction"):
         inst_w = cfg.get("instruction_width_mm", 300)                  # 30 см
-        scale = inst_w / W
+        iscale = inst_w / W
         igap = 2 * seam_mm_v + 150
+        fnt = cfg.get("instruction_font_mm", 6)
         ix0 = W + igap; iy0 = max(seam_mm_v + 60, 60)
-        inst = _instruction(pieces, lay, W, H, ix0, iy0, scale, cfg.get("instruction_font_mm", 7))
-        pieces.append(("instrukciya_sborki", inst))
-        W = ix0 + inst_w + igap                                        # лист шире на инструкцию
-        H = max(H, iy0 + H * scale + igap)
+        inst_body = _instruction(pieces, lay, W, H, ix0, iy0, iscale, fnt)
+        inst = ("instrukciya_sborki", inst_body)
+        inst_bbox = (ix0, iy0 - fnt * 2.5, ix0 + inst_w, iy0 + H * iscale)
+
+    if cfg.get("roll_print"):                                          # САМА ПЕЧАТЬ = копия деталей в рулон НИЖЕ фигуры
+        roll_h = cfg.get("roll_width_mm", 1440)
+        rgap = 2 * seam_mm_v + 20
+        y_off = H + 2 * seam_mm_v + 200                                # ниже фигуры
+        roll_pieces, roll_W = _rollpack_svg(pieces, roll_h, rgap, lay,
+                                            y_off=y_off, inst=inst, inst_bbox=inst_bbox)
+        pieces = pieces + roll_pieces                                  # фигура (верх) + печать-копия (низ)
+        W = max(W, roll_W); H = y_off + roll_h + 2 * seam_mm_v + 100
+    elif inst is not None:                                             # без рулона — инструкция рядом справа
+        pieces.append(inst)
+        W = inst_bbox[2] + igap; H = max(H, inst_bbox[3] + igap)
 
     # сборка: каждая запись pieces -> отдельный Form XObject (= группа в Corel)
     hdr = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.2f}mm" height="{H:.2f}mm" '
