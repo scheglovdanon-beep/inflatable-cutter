@@ -100,26 +100,10 @@ def main():
         pp = _prep(poly_pt.buffer(2))
         return [dd for dd in dds if pp.contains(_Pt((dd["rect"].x0 + dd["rect"].x1) / 2, (dd["rect"].y0 + dd["rect"].y1) / 2))]
 
-    # ПЕРЁД (текстура без руки + контур + припуск)
-    fr_in = _inside_fills(front_drawings(page, cfg)[0], fig.contour_pt)
-    pieces.append(("front", [_design_group(fr_in, _tex_tf(contour_mm, lay["front"], f_mm), f_mm, "front_tex"),
-                             _poly(list(lay["front"].exterior.coords), stroke="#000", sw=lw),
-                             _poly(list(lay["front_seam"].exterior.coords), stroke="#dc0000", sw=lw)]))
-
-    # ЗАД (текстура без руки + контур + припуск)
-    bk = lay.get("back")
-    if bk:
-        from sides import back_drawings
-        bk_in = _inside_fills(back_drawings(page, cfg)[0], bk["cut_pt"]) if bk.get("cut_pt") else back_drawings(page, cfg)[0]
-        bbody = [_design_group(bk_in, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["f_mm"], "back_tex"),
-                 _poly(list(bk["poly"].exterior.coords), stroke="#000", sw=lw)]
-        if bk.get("seam"):
-            bbody.append(_poly(list(bk["seam"].exterior.coords), stroke="#dc0000", sw=lw))
-        pieces.append(("back", bbody))
-
     # КЛЮЧ СБОРКИ: дуги стыков с боковинами — цвет = цвет боковины. Подсветка лежит В КОЛЬЦЕ
     # ПРИПУСКА (смещена НАРУЖУ на ~половину припуска, ширина < припуска) — НЕ заходит за контур
     # (рекламная конструкция, строго). На переде по gusset_line, на заде — зеркало переда.
+    # Считаем ДО сборки, кладём дуги ВНУТРЬ группы переда/зада -> деталь цельная.
     from shapely.geometry import Point as _Pt2
     from shapely.prepared import prep as _prep2
     seam_mm_v = cfg.get("seam_allowance_mm", 10)
@@ -152,18 +136,44 @@ def main():
             out.append(f'<path d="{d}" fill="none" stroke="{col}" stroke-width="{sw_seam}" stroke-linecap="round"/>')
         out.append("</g>")
         return "\n".join(out)
-    pieces.append(("seam_match_front", [_arc_paths(front_arcs, lay["front"], "seam_front")]))
-    if bk:                                                            # зеркало дуг переда в bbox зада
-        fb = lay["front"].bounds; bbx = bk["poly"].bounds
+
+    # ПЕРЁД (текстура без руки + контур + припуск + цветной ключ-полоска — всё в одной группе)
+    fr_in = _inside_fills(front_drawings(page, cfg)[0], fig.contour_pt)
+    pieces.append(("front", [_design_group(fr_in, _tex_tf(contour_mm, lay["front"], f_mm), f_mm, "front_tex"),
+                             _poly(list(lay["front"].exterior.coords), stroke="#000", sw=lw),
+                             _poly(list(lay["front_seam"].exterior.coords), stroke="#dc0000", sw=lw),
+                             _arc_paths(front_arcs, lay["front"], "seam_front")]))
+
+    # ЗАД (текстура без руки + контур + припуск + ключ-полоска зеркально — всё в одной группе)
+    bk = lay.get("back")
+    if bk:
+        from sides import back_drawings
+        bk_in = _inside_fills(back_drawings(page, cfg)[0], bk["cut_pt"]) if bk.get("cut_pt") else back_drawings(page, cfg)[0]
+        bbody = [_design_group(bk_in, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["f_mm"], "back_tex"),
+                 _poly(list(bk["poly"].exterior.coords), stroke="#000", sw=lw)]
+        if bk.get("seam"):
+            bbody.append(_poly(list(bk["seam"].exterior.coords), stroke="#dc0000", sw=lw))
+        fb = lay["front"].bounds; bbx = bk["poly"].bounds              # зеркало дуг переда в bbox зада
         fw = (fb[2] - fb[0]) or 1.0; fh = (fb[3] - fb[1]) or 1.0; bw = bbx[2] - bbx[0]; bh = bbx[3] - bbx[1]
         mir = lambda p: (bbx[0] + (1 - (p[0] - fb[0]) / fw) * bw, bbx[1] + (p[1] - fb[1]) / fh * bh)
         back_arcs = [(col, [mir(p) for p in pts]) for col, pts in front_arcs]
-        pieces.append(("seam_match_back", [_arc_paths(back_arcs, bk["poly"], "seam_back")]))
+        bbody.append(_arc_paths(back_arcs, bk["poly"], "seam_back"))
+        pieces.append(("back", bbody))
 
-    # БОКОВИНЫ (цвет + контур + припуск [+ отверстие руки])
+    # БОКОВИНЫ (цвет-зоны + ЧЁРНЫЙ контур + цветной ключ-полоса вдоль стыков в припуске + припуск)
+    from side_color import _edges_top_down
+    from shapely.geometry import Polygon as _Poly
     for s in lay["strips"]:
         body = [_poly(q, fill=HEX(c), stroke="none", sw=0) for q, c in strip_band_quads(s)]
-        body.append(_poly(list(s["poly"]), stroke=HEX(_palette(s["i"])), sw=lw))
+        # цветной ключ: тот же цвет, что дуга переда (_palette[i]), вдоль ОБОИХ длинных рёбер
+        # (стык с передом и с задом), смещён НАРУЖУ в кольцо припуска — не заходит за контур.
+        spp = _prep2(_Poly(list(s["poly"])))
+        le, re = _edges_top_down(list(s["poly"]), s.get("waist") is not None)
+        keycol = HEX(_palette(s["i"]))
+        for edge in (le, re):
+            d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _offset_out(edge, spp, off))
+            body.append(f'<path d="{d}" fill="none" stroke="{keycol}" stroke-width="{sw_seam}" stroke-linecap="round"/>')
+        body.append(_poly(list(s["poly"]), stroke="#000", sw=lw))      # контур детали — чёрный
         if s.get("seam"):
             body.append(_poly(list(s["seam"].exterior.coords), stroke="#dc0000", sw=lw))
         if ah and ah.get("piece") == s["i"]:
