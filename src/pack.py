@@ -156,9 +156,10 @@ def arrange_print(layout, gap=120.0):
     if front_cx is None:
         front_cx = x / 2.0; front_bottom = bottom
 
-    # ДНИЩЕ — под ПЕРЕДОМ (по центру), НОЖКА — под днищем (стопкой вниз)
+    # ДНИЩЕ — под ПЕРЕДОМ (по центру оси переда), НОЖКА — под днищем (стопкой вниз).
+    # Ставим НИЖЕ самой длинной колонки (bottom), чтобы ничего не было сбоку -> нет касаний.
     dn = cats.get("base", []); leg = cats.get("leg", [])
-    y = front_bottom + gap
+    y = bottom + gap
     for grp in (dn, leg):
         for it in grp:
             it["mv"](front_cx - (it["x"] + it["w"] / 2.0), y - it["y"])
