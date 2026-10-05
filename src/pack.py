@@ -143,20 +143,28 @@ def arrange_print(layout, gap=120.0):
         [[it] for it in cats.get("back", [])],                          # ЗАД
     ]
     x, bottom = gap, gap
-    for col in columns:
+    front_cx = None; front_bottom = gap
+    FRONT_COL = 3                                                       # индекс колонки ПЕРЁД в columns
+    for ci, col in enumerate(columns):
         if not col:
             continue
         w, yb = place_blocks(col, x)
         if w > 0:
+            if ci == FRONT_COL:                                         # запомнить центр/низ переда
+                front_cx = x + w / 2.0; front_bottom = yb
             x += w + gap; bottom = max(bottom, yb)
+    if front_cx is None:
+        front_cx = x / 2.0; front_bottom = bottom
 
-    base = cats.get("base", []) + cats.get("leg", [])                   # днище+ножка — внизу по центру, в ряд
-    if base:
-        total = sum(it["w"] for it in base) + gap * (len(base) - 1)
-        bx = max(gap, (x - total) / 2.0); by = bottom + gap
-        for it in base:
-            it["mv"](bx - it["x"], by - it["y"]); bx += it["w"] + gap
-        bottom = by + max(it["h"] for it in base)
+    # ДНИЩЕ — под ПЕРЕДОМ (по центру), НОЖКА — под днищем (стопкой вниз)
+    dn = cats.get("base", []); leg = cats.get("leg", [])
+    y = front_bottom + gap
+    for grp in (dn, leg):
+        for it in grp:
+            it["mv"](front_cx - (it["x"] + it["w"] / 2.0), y - it["y"])
+            y += it["h"] + gap
+        if grp:
+            bottom = max(bottom, y - gap)
 
     layout["sheet_w"] = x + gap
     layout["sheet_h"] = bottom + gap
