@@ -35,7 +35,7 @@ def main():
         arr = np.asarray(arm_poly.exterior.coords[:-1], float)
         wrist, tip, _ = _wrist_on_poly(page, arr, a["tip"], cfg)
         hand_pts, rest_pts = cut_arm(arr, wrist, tip)                 # КИСТЬ | (предплечье+плечо)
-        elbow, fore_c, sh_c = _arm_zone_colors(page, arm_poly, arr, wrist, tip, cfg)
+        elbow, fore_c, sh_c = _arm_zone_colors(page, arm_poly, arr, wrist, tip, cfg, armpit=a.get("f"))
         wmid = (np.asarray(wrist[0], float) + np.asarray(wrist[1], float)) / 2.0
         parts = {"kist": hand_pts}
         if elbow is not None:                                        # ЛОКОТЬ делит остаток

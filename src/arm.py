@@ -347,7 +347,7 @@ def cut_across_arm(body, f, tip, cfg, blade=None):
     """Рез тела лезвием через подмышку f. По умолчанию — ПЕРПЕНДИКУЛЯРНО оси руки (f->tip);
     если передан явный `blade` (пара концов), режем им (стратегия «пара подмышек»).
     Возвращает (arm_poly, rest_poly) или (None, None) если рез не состоялся/срезал корпус."""
-    from shapely.geometry import LineString
+    from shapely.geometry import LineString, Point
     from shapely.ops import split, unary_union
     f = np.asarray(f, float); tip = np.asarray(tip, float)
     if blade is None:
@@ -357,6 +357,18 @@ def cut_across_arm(body, f, tip, cfg, blade=None):
     blade = LineString([tuple(p0), tuple(p1)])
     sp = split(body, blade)
     parts = list(getattr(sp, "geoms", [sp]))
+    if len(parts) < 2:                                            # концы «пары подмышек» часто лежат ЧУТЬ
+        ext = body.exterior                                       # внутри контура -> split не режет. Привяжем
+        def _pierce(p, other):                                    # концы к контуру и чуть выведем наружу.
+            P = Point(*p)
+            if not body.contains(P):
+                return tuple(p)
+            b = np.asarray(ext.interpolate(ext.project(P)).coords[0], float)
+            d = b - np.asarray(other, float); n = np.hypot(*d) or 1.0
+            return tuple(b + d / n * 2.0)                         # 2pt за контур (от другого конца)
+        blade = LineString([_pierce(p0, p1), _pierce(p1, p0)])
+        sp = split(body, blade)
+        parts = list(getattr(sp, "geoms", [sp]))
     if len(parts) < 2:
         return None, None
     arm = piece_containing(parts, tuple(tip))
@@ -989,7 +1001,7 @@ def _wrist_on_poly(page, arm_pt, tip, cfg):
     return best[2], tip, best[1]
 
 
-def build_arm_from_poly(page, arm_pt, tip, scale, cfg):
+def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None):
     """РУКА ПО ЭТАЛОННОМУ ШАБЛОНУ (examples/arm_template.pdf, фикс. форма для фигуры 2700,
     Ø250) + КИСТЬ, задетектированная из НАШЕГО вырезанного полигона руки (detect_armpits).
 
@@ -1023,7 +1035,7 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg):
 
     # 4) ЦВЕТ ЗОН: детект локтя -> цвет предплечья (кожа) и плеча (рукав) с РЕАЛЬНОЙ руки.
     #    predplechie = цвет предплечья; plecho и baza(полоска крепления) = цвет плеча.
-    elbow_cut, fore_color, sh_color = _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip_used, cfg)
+    elbow_cut, fore_color, sh_color = _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip_used, cfg, armpit=armpit)
     if fore_color is None:                                           # зона пустая (короткое предплечье/
         fore_color = sh_color                                       # однородный рукав) -> цвет другой зоны
     if sh_color is None:
@@ -1035,7 +1047,7 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg):
         baza["fill"] = sh_color
 
     if cfg.get("arm_texture_bands"):                                 # полосы текстуры вдоль руки (как боковины)
-        fore_bands, sh_bands = _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip_used, cfg)
+        fore_bands, sh_bands = _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip_used, cfg, armpit=armpit)
         if fore_bands:
             pred["bands"] = fore_bands
         if sh_bands:
@@ -1093,6 +1105,43 @@ def _elbow_color_s(page, arm_poly, wmid, u, L, cfg):
     return best
 
 
+def _elbow_edge_colors(page, arm_poly, wmid, u, L, elbow_s, cfg):
+    """Цвета по обе стороны от локтя (перехода рукав<->кожа): доминирующий цвет растровых
+    срезов по ширине руки в узких полосах НИЖЕ локтя (кожа/предплечье) и ВЫШЕ (рукав/плечо).
+    Семплим РЯДОМ с локтем, поэтому не залезаем в корпус (у мужика с табличкой зона плеча
+    у тела = красный логотип). Возвращает (fore_color|None, sh_color|None)."""
+    from side_color import front_raster
+    from sides import front_drawings
+    from collections import Counter
+    img, bx0, by0, Z, mg = front_raster(page, front_drawings)
+    H, W = img.shape[:2]
+    wmid = np.asarray(wmid, float); u = np.asarray(u, float)
+
+    def colat(p):
+        px = int((p[0] - bx0 + mg) * Z); py = int((p[1] - by0 + mg) * Z)
+        return tuple(int(v) for v in img[min(H - 1, max(0, py)), min(W - 1, max(0, px))])
+
+    def band_dom(s_lo, s_hi):
+        cols = []
+        n = max(3, int((s_hi - s_lo) / cfg.get("arm_band_step_pt", 6)))
+        for k in range(n):
+            s = s_lo + (s_hi - s_lo) * (k + 0.5) / n
+            ch = _perp_chord(arm_poly, wmid + u * s, u)
+            if ch is None:
+                continue
+            a = np.asarray(ch[0], float); b = np.asarray(ch[1], float)
+            for t in np.linspace(0.25, 0.75, 7):                     # центр среза (без краёв/контура)
+                c = colat(a + (b - a) * t)
+                if sum(c) >= 60 and not (min(c) > 200):               # без контура и без белого фона
+                    cols.append(c)
+        return Counter(cols).most_common(1)[0][0] if cols else None
+
+    reach = cfg.get("elbow_edge_reach_frac", 0.18) * L               # ширина полосы по каждую сторону
+    fore = band_dom(max(0.0, elbow_s - reach), elbow_s)              # предплечье (кожа)
+    sh = band_dom(elbow_s, min(L, elbow_s + reach))                  # плечо (рукав)
+    return fore, sh
+
+
 def _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg):
     """Локоть вдоль оси (s от запястья): сперва глубочайшая ВОГНУТОСТЬ контура в полосе; если
     её нет (плавный сгиб, напр. скафандр) — по ИЗГИБУ осевой линии (скелет). Возвращает
@@ -1146,7 +1195,7 @@ def _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg):
     return 0.5 * L, None
 
 
-def _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip, cfg):
+def _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip, cfg, armpit=None):
     """Полосы текстуры вдоль руки (как у боковин): вдоль оси запястье->подмышка берём
     доминирующий цвет в тонких срезах, сливаем похожие (hue) и схлопываем мелочь. Делим
     по локтю: предплечье [запястье..локоть] и плечо [локоть..подмышка]. Возвращает
@@ -1154,7 +1203,10 @@ def _arm_zone_bands(page, arm_poly, arm_arr, wrist, tip, cfg):
     from side_color import arm_zone_color, _simplify_bands, _merge_small_bands
     wmid = (np.asarray(wrist[0], float) + np.asarray(wrist[1], float)) / 2.0
     tip = np.asarray(tip, float)
-    far = arm_arr[int(np.argmax(np.hypot(arm_arr[:, 0] - tip[0], arm_arr[:, 1] - tip[1])))]
+    if armpit is not None:
+        far = np.asarray(armpit, float)
+    else:
+        far = arm_arr[int(np.argmax(np.hypot(arm_arr[:, 0] - tip[0], arm_arr[:, 1] - tip[1])))]
     u = far - wmid; L = float(np.hypot(*u))
     if L < 1e-6:
         return None, None
@@ -1271,14 +1323,19 @@ def _elbow_by_color_edges(page, arm_poly, arm_arr, wrist, tip, cfg):
     return None
 
 
-def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg):
+def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg, armpit=None):
     """Локоть = самая глубокая вогнутость контура руки в осевой полосе между запястьем и
     подмышкой. Делит руку на предплечье (запястье..локоть) и плечо (локоть..подмышка);
-    возвращает (elbow_chord, fore_color, sh_color). Цвета берутся из 2D по зонам."""
+    возвращает (elbow_chord, fore_color, sh_color). Цвета берутся из 2D по зонам.
+    armpit — истинная подмышка из реза (a["f"]): задаёт КОНЕЦ оси руки, чтобы зона плеча не
+    уходила в корпус (у «мужика с табличкой» полигон руки прихватывает туловище с логотипом)."""
     from side_color import arm_zone_color
     wmid = (np.asarray(wrist[0], float) + np.asarray(wrist[1], float)) / 2.0
     tip = np.asarray(tip, float)
-    far = arm_arr[int(np.argmax(np.hypot(arm_arr[:, 0] - tip[0], arm_arr[:, 1] - tip[1])))]  # подмышка
+    if armpit is not None:                                           # конец оси = настоящая подмышка
+        far = np.asarray(armpit, float)
+    else:
+        far = arm_arr[int(np.argmax(np.hypot(arm_arr[:, 0] - tip[0], arm_arr[:, 1] - tip[1])))]
     u = far - wmid; L = float(np.hypot(*u))
     if L < 1e-6:
         return None, None, None
@@ -1289,7 +1346,13 @@ def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg):
     else:
         elbow_s, elbow_p = _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg)  # 2) вогнутость/изгиб скелета
     fore = arm_zone_color(page, arm_poly, wmid, u, 0.0, elbow_s)
-    sh = arm_zone_color(page, arm_poly, wmid, u, elbow_s, L + 1e6)
+    sh = arm_zone_color(page, arm_poly, wmid, u, elbow_s, L)         # до подмышки, не в корпус
+    if esc is not None:                                             # цвет рукава берём ПРЯМО с перехода (манжет),
+        cfore, csh = _elbow_edge_colors(page, arm_poly, wmid, u, L, esc, cfg)  # не из широкой зоны у корпуса
+        if csh is not None:
+            sh = csh
+        if cfore is not None and fore is None:
+            fore = cfore
     elbow_chord = None
     if elbow_p is not None:
         ch = _perp_chord(arm_poly, elbow_p, u)
