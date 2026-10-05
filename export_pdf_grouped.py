@@ -107,7 +107,9 @@ def main():
     from shapely.geometry import Point as _Pt2
     from shapely.prepared import prep as _prep2
     seam_mm_v = cfg.get("seam_allowance_mm", 10)
-    off = seam_mm_v / 2.0; sw_seam = max(2.0, seam_mm_v - 3.0)       # в пределах кольца, не за контур
+    # полоса-ключ ЦЕЛИКОМ в кольце припуска, с зазором от чёрного контура (не заходит внутрь детали):
+    # центр на 0.6·припуска наружу, ширина 0.5·припуска -> внутр. край ≈0.35·припуска снаружи контура.
+    off = seam_mm_v * 0.6; sw_seam = max(2.0, seam_mm_v * 0.5)
 
     def _offset_out(pts, panel_prep, d):
         arr = np.asarray(pts, float); res = []
@@ -163,15 +165,29 @@ def main():
     # БОКОВИНЫ (цвет-зоны + ЧЁРНЫЙ контур + цветной ключ-полоса вдоль стыков в припуске + припуск)
     from side_color import _edges_top_down
     from shapely.geometry import Polygon as _Poly
+
+    def _edge_out(edge, centroid, d):
+        """Сместить ребро детали НАРУЖУ на d: нормаль ориентируем ОТ центра детали (надёжно
+        для прямых рёбер/углов, в отличие от panel.contains, что врёт на углах)."""
+        arr = np.asarray(edge, float); cen = np.asarray(centroid, float); res = []
+        for i in range(len(arr)):
+            a = arr[max(0, i - 1)]; b = arr[min(len(arr) - 1, i + 1)]
+            t = b - a; L = float(np.hypot(*t))
+            nrm = (arr[i] - cen) if L < 1e-6 else np.array([-t[1], t[0]]) / L
+            if np.dot(nrm, arr[i] - cen) < 0:                        # наружу = прочь от центра
+                nrm = -nrm
+            res.append(tuple(arr[i] + nrm * d))
+        return res
+
     for s in lay["strips"]:
         body = [_poly(q, fill=HEX(c), stroke="none", sw=0) for q, c in strip_band_quads(s)]
         # цветной ключ: тот же цвет, что дуга переда (_palette[i]), вдоль ОБОИХ длинных рёбер
-        # (стык с передом и с задом), смещён НАРУЖУ в кольцо припуска — не заходит за контур.
-        spp = _prep2(_Poly(list(s["poly"])))
+        # (стык с передом и с задом), ЦЕЛИКОМ в кольце припуска, с зазором от чёрного контура.
+        cen = np.asarray(_Poly(list(s["poly"])).centroid.coords[0], float)
         le, re = _edges_top_down(list(s["poly"]), s.get("waist") is not None)
         keycol = HEX(_palette(s["i"]))
         for edge in (le, re):
-            d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _offset_out(edge, spp, off))
+            d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(edge, cen, off))
             body.append(f'<path d="{d}" fill="none" stroke="{keycol}" stroke-width="{sw_seam}" stroke-linecap="round"/>')
         body.append(_poly(list(s["poly"]), stroke="#000", sw=lw))      # контур детали — чёрный
         if s.get("seam"):
