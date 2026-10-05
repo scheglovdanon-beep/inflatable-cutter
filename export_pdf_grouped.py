@@ -252,38 +252,61 @@ def _bbox_for(name, lay):
     return None
 
 
+def _poly_for(name, lay):
+    """Реальный полигон-контур детали (seam, если есть) — для полигонального нестинга."""
+    from shapely.geometry import Polygon as _P, box as _bx
+    from shapely.ops import unary_union
+    if name == "front":
+        return lay.get("front_seam") or lay["front"]
+    if name == "back" and lay.get("back"):
+        bk = lay["back"]; return bk.get("seam") or bk["poly"]
+    if name.startswith("bokovina_"):
+        i = int(name.split("_")[1])
+        for s in lay.get("strips", []):
+            if s["i"] == i:
+                return s.get("seam") or _P(s["poly"])
+    if name.startswith("kist_"):
+        nm = name[5:]
+        for p in lay.get("hand_pieces", []):
+            if str(p.get("name")) == nm:
+                return p.get("seam") or p["poly"]
+    if name.startswith("ruka_"):
+        nm = name[5:]
+        for p in lay.get("arm_pieces", []):
+            if str(p.get("name")) == nm:
+                return p.get("seam") or p["poly"]
+    if name == "zapasnaya_ruka":
+        geoms = [(p.get("seam") or p["poly"]) for p in lay.get("spare_arm", [])]
+        return unary_union(geoms) if geoms else None
+    if name == "dnishe" and lay.get("base"):
+        b = lay["base"]; return b.get("dnishe_seam") or b["dnishe"]
+    if name == "nozhka" and lay.get("base"):
+        b = lay["base"]; lx, ly, lw, lh = b["leg"]
+        return b.get("leg_seam") or _bx(lx, ly, lx + lw, ly + lh)
+    return None
+
+
 def _rollpack_svg(parts, roll_h, gap, lay, y_off=0.0, suffix="_печать", inst=None, inst_bbox=None):
-    """КОПИЯ всех деталей (+ инструкция), компактно упакованная в РУЛОН высотой roll_h
-    (ширина мин.), повороты разрешены — это САМА ПЕЧАТЬ. Размещается со смещением вниз (y_off),
-    т.е. НИЖЕ фигуры. Детали-копии двигаются SVG-трансформом. Возвращает (pieces_копии, ширина)."""
-    from rectpack import newPacker, MaxRectsBaf, SORT_AREA
-    boxes = {}
-    for i, (name, _b) in enumerate(parts):
-        b = _bbox_for(name, lay)
-        if b is not None:
-            boxes[i] = b
-    packer = newPacker(rotation=True, pack_algo=MaxRectsBaf, sort_algo=SORT_AREA)
-    tot = sum((boxes[i][2] - boxes[i][0] + gap) for i in boxes)
-    for i in boxes:
-        x0, y0, x1, y1 = boxes[i]; packer.add_rect(x1 - x0 + gap, y1 - y0 + gap, rid=i)
-    packer.add_bin(tot + gap, roll_h); packer.pack()
-    placed = {}
-    for b in packer:
-        for r in b:
-            placed[r.rid] = (r.x, r.y, r.width, r.height)
+    """КОПИЯ всех деталей (+ инструкция), компактно упакованная в РУЛОН высотой roll_h по
+    РЕАЛЬНОЙ ФОРМЕ (polygon-nesting: детали ложатся в вогнутости друг друга) — это САМА ПЕЧАТЬ,
+    НИЖЕ фигуры (y_off). Детали-копии двигаются SVG-трансформом. Возвращает (pieces_копии, ширина)."""
+    from pack import nest_shapes
+    shapes = []
+    for name, _b in parts:
+        poly = _poly_for(name, lay)
+        if poly is not None and not poly.is_empty:
+            shapes.append((name, poly))
+    placements, nested_w = nest_shapes(shapes, roll_h, gap)
     gy = f'translate(0,{y_off:.3f}) '                                  # весь рулон — ниже фигуры
-    out, maxx = [], 0.0
-    for i, (name, body) in enumerate(parts):
-        if i not in placed:
+    out = []
+    for name, body in parts:
+        M = placements.get(name)
+        if M is None:
             continue
-        x0, y0, x1, y1 = boxes[i]; px, py, pw, ph = placed[i]
-        if abs(pw - ((x1 - x0) + gap)) > 1.0:                          # повёрнут на 90°
-            tf = f'matrix(0,1,-1,0,{px + gap / 2 + y1:.3f},{py + gap / 2 - x0:.3f})'
-        else:
-            tf = f'translate({px + gap / 2 - x0:.3f},{py + gap / 2 - y0:.3f})'
+        a, b, d, e, xo, yo = M                                         # shapely affine -> SVG matrix(a,d,b,e,e_x,f_y)
+        tf = f'matrix({a:.6f},{d:.6f},{b:.6f},{e:.6f},{xo:.3f},{yo:.3f})'
         out.append((name + suffix, [f'<g transform="{gy}{tf}">'] + body + ["</g>"]))
-        maxx = max(maxx, px + pw)
-    W = maxx + gap
+    W = nested_w + gap
     if inst is not None and inst_bbox is not None:                     # инструкция — в конце рулона, без поворота
         ix0, iy0, ix1, iy1 = inst_bbox
         tf = f'translate({W + gap - ix0:.3f},{gap - iy0:.3f})'

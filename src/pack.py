@@ -345,6 +345,55 @@ def nest_roll(layout, roll_h=1440.0, gap=30.0):
     layout["roll"] = roll_h
 
 
+def nest_shapes(shapes, roll_h, gap, rotations=(0, 90, 180, 270)):
+    """ПОЛИГОНАЛЬНЫЙ нестинг по РЕАЛЬНОЙ форме (не по bbox): детали укладываются в вогнутые
+    места друг друга -> компактнее. Bottom-left по кандидатным точкам (рёбра уложенных),
+    повороты, зазор через buffer(gap/2). shapes=[(id, polygon)]. Возвращает ({id: affine6}, width).
+    affine6 — shapely affine (a,b,d,e,xoff,yoff), двигает ИСХОДНЫЙ полигон детали на место."""
+    from shapely import affinity
+    from shapely.ops import unary_union
+    from shapely.prepared import prep
+    infl = [(sid, poly.buffer(gap / 2.0, join_style=2, quad_segs=2)) for sid, poly in shapes]
+    infl.sort(key=lambda t: -(t[1].bounds[2] - t[1].bounds[0]) * (t[1].bounds[3] - t[1].bounds[1]))
+    ROT = {0: (1.0, 0.0, 0.0, 1.0), 90: (0.0, -1.0, 1.0, 0.0),
+           180: (-1.0, 0.0, 0.0, -1.0), 270: (0.0, 1.0, -1.0, 0.0)}
+    step = max(gap * 0.8, 25.0)                                        # шаг сетки bottom-left
+    placed, pu, pp, cur_w, res = [], None, None, 0.0, {}
+    for sid, ip in infl:
+        best = None                                                    # (x, y, M, cand) — самый ЛЕВЫЙ слот
+        for ang in rotations:
+            a, b, d, e = ROT[ang]
+            rp = affinity.affine_transform(ip, (a, b, d, e, 0.0, 0.0))
+            rb = rp.bounds; w = rb[2] - rb[0]; h = rb[3] - rb[1]
+            if h > roll_h + 1e-6:
+                continue
+            xlim = cur_w + w + step                                    # дальше смысла нет
+            x = 0.0; found = None
+            while x <= xlim:
+                y = 0.0
+                while y + h <= roll_h + 1e-6:
+                    M = (a, b, d, e, x - rb[0], y - rb[1])
+                    cand = affinity.affine_transform(ip, M)
+                    if pp is None or not pp.intersects(cand):
+                        found = (x, y, M, cand); break                 # нижайший Y для этого X
+                    y += step
+                if found:
+                    break                                              # самый левый X с допустимым слотом
+                x += step
+            if found and (best is None or found[0] < best[0] - 1e-6
+                          or (abs(found[0] - best[0]) <= 1e-6 and found[1] < best[1])):
+                best = found
+        if best is None:                                               # не влезло (не должно) -> новая колонка
+            a, b, d, e = ROT[0]; rb = ip.bounds
+            M = (a, b, d, e, cur_w - rb[0], -rb[1]); cand = affinity.affine_transform(ip, M)
+            best = (cur_w, 0.0, M, cand)
+        _, _, M, cand = best
+        res[sid] = M; placed.append(cand)
+        pu = cand if pu is None else unary_union([pu, cand])
+        pp = prep(pu); cur_w = max(cur_w, cand.bounds[2])
+    return res, cur_w
+
+
 def repack_layout(layout, gap=80.0, width=None):
     """Разложить все детали по полкам (shelf) без наложений: сортировка по высоте,
     слева-направо, перенос строки при переполнении ширины. Зазор gap между bbox-припусков."""
