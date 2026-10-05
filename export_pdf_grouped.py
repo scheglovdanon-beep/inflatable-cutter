@@ -164,6 +164,59 @@ def _piece_svg(p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill="#f5f
     return body
 
 
+_RU = {"predplechie": "Предплечье", "plecho": "Плечо", "baza": "База",
+       "левая сторона": "Кисть Л", "правая сторона": "Кисть П", "боковина": "Полоска"}
+
+
+def _label_positions(lay):
+    """Список (русская_подпись, cx, cy) — центр каждой детали в координатах раскладки (мм)."""
+    from shapely.geometry import Polygon as _P
+    labs = []
+    if lay.get("front") is not None:
+        c = lay["front"].centroid; labs.append(("Перёд", c.x, c.y))
+    bk = lay.get("back")
+    if bk:
+        c = bk["poly"].centroid; labs.append(("Зад", c.x, c.y))
+    for s in lay.get("strips", []):
+        c = _P(s["poly"]).centroid; labs.append((f"Боковина {s['i']}", c.x, c.y))
+    for p in lay.get("hand_pieces", []):
+        c = p["poly"].centroid; labs.append((_RU.get(p.get("name"), str(p.get("name"))), c.x, c.y))
+    for p in lay.get("arm_pieces", []):
+        c = p["poly"].centroid; labs.append((_RU.get(p.get("name"), str(p.get("name"))), c.x, c.y))
+    sp = lay.get("spare_arm", [])                                     # запасная рука = копия -> ОДНА подпись блоком
+    if sp:
+        cs = [p["poly"].centroid for p in sp]
+        labs.append(("Запасная рука", sum(c.x for c in cs) / len(cs), min(c.y for c in cs) - 40))
+    b = lay.get("base")
+    if b:
+        c = b["dnishe"].centroid; labs.append(("Днище", c.x, c.y))
+        lx, ly, lw, lh = b["leg"]; labs.append(("Ножка", lx + lw / 2, ly + lh / 2))
+    return labs
+
+
+def _instruction(pieces, lay, W, H, x0, y0, scale, font_mm):
+    """ИНСТРУКЦИЯ ПО СБОРКЕ: уменьшенная КОПИЯ всех деталей (одной группой) в прямоугольнике
+    шириной instruction_width_mm, + русские подписи каждой детали. Размещается рядом справа."""
+    out = [f'<text x="{x0:.2f}" y="{y0 - font_mm * 1.2:.2f}" font-size="{font_mm * 1.8:.2f}" '
+           f'fill="#000" font-family="sans-serif" font-weight="bold">ИНСТРУКЦИЯ ПО СБОРКЕ</text>',
+           f'<g transform="translate({x0:.3f},{y0:.3f}) scale({scale:.6f})">']        # копия всех деталей, уменьшенная
+    for _name, body in pieces:
+        out.extend(body)
+    out.append("</g>")
+    out.append(f'<rect x="{x0:.2f}" y="{y0:.2f}" width="{W * scale:.2f}" height="{H * scale:.2f}" '
+               f'fill="none" stroke="#000" stroke-width="0.6"/>')
+    for lab, cx, cy in _label_positions(lay):                                          # подписи поверх (не масштабируются)
+        tx = x0 + cx * scale; ty = y0 + cy * scale
+        esc = lab.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        common = (f'x="{tx:.2f}" y="{ty:.2f}" font-size="{font_mm:.2f}" font-family="sans-serif" '
+                  f'text-anchor="middle" font-weight="bold"')
+        # белый ореол (рисуем ПЕРВЫМ) + красный текст сверху — надёжно в любом вьюере (без paint-order)
+        out.append(f'<text {common} fill="#ffffff" stroke="#ffffff" stroke-width="{font_mm * 0.45:.2f}" '
+                   f'stroke-linejoin="round">{esc}</text>')
+        out.append(f'<text {common} fill="#c00000">{esc}</text>')
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("input_pdf")
     ap.add_argument("--config", default="config.yaml"); ap.add_argument("-o", "--out", default="out/layout_grouped.pdf")
@@ -355,6 +408,18 @@ def main():
         if b.get("leg_seam"):
             lb.append(_poly(list(b["leg_seam"].exterior.coords), stroke="#dc0000", sw=lw))
         pieces.append(("nozhka", lb))
+
+    # ИНСТРУКЦИЯ ПО СБОРКЕ: копия всех деталей, уменьшенная в прямоугольник шириной 30 см,
+    # рядом справа, с русскими подписями каждой детали. Расширяем лист вправо.
+    if cfg.get("assembly_instruction"):
+        inst_w = cfg.get("instruction_width_mm", 300)                  # 30 см
+        scale = inst_w / W
+        igap = 2 * seam_mm_v + 150
+        ix0 = W + igap; iy0 = max(seam_mm_v + 60, 60)
+        inst = _instruction(pieces, lay, W, H, ix0, iy0, scale, cfg.get("instruction_font_mm", 7))
+        pieces.append(("instrukciya_sborki", inst))
+        W = ix0 + inst_w + igap                                        # лист шире на инструкцию
+        H = max(H, iy0 + H * scale + igap)
 
     # сборка: каждая запись pieces -> отдельный Form XObject (= группа в Corel)
     hdr = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.2f}mm" height="{H:.2f}mm" '
