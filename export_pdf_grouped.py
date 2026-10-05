@@ -218,10 +218,13 @@ def main():
            f'viewBox="0 0 {W:.2f} {H:.2f}">')
     master = pymupdf.open(); mpage = master.new_page(width=W * MM2PT, height=H * MM2PT)
     mpage.draw_rect(mpage.rect, color=None, fill=(1, 1, 1))
+    # каждая деталь -> свой слой (PDF OCG) с именем детали: Corel импортирует деталь ЦЕЛИКОМ
+    # (контур+заливка+текстура+припуск на одном слое), её можно переносить как единое целое.
     for name, body in pieces:
         svg = hdr + "\n".join(body) + "</svg>"
         src = pymupdf.open("pdf", cairosvg.svg2pdf(bytestring=svg.encode("utf-8")))
-        mpage.show_pdf_page(mpage.rect, src, 0)
+        ocg = master.add_ocg(name)                                    # слой-группа детали
+        mpage.show_pdf_page(mpage.rect, src, 0, oc=ocg)
         src.close()
     master.save(args.out, garbage=3, deflate=True)
     sz = os.path.getsize(args.out) / 1024
