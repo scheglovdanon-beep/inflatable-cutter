@@ -61,3 +61,4 @@ arm_template: true
 accent_sat_min: 0.15
 band_merge_small_frac: 0.12
 arrange_sides: false
+print_arrange: true    # печатная раскладка «в ряд»: запаска|рука|лев.боковины|ПЕРЁД|прав.боковины|ЗАД, днище+ножка вниз

@@ -47,12 +47,13 @@ def _movables(layout):
         add("strip_" + (s.get("side") or "left"), s.get("seam") or Polygon(s["poly"]), mvs)
 
     for key in ("arm_pieces", "hand_pieces", "spare_arm"):
+        cat = "arm_spare" if key == "spare_arm" else "arm_main"       # основная рука vs запасная (двигаем блоком)
         for p in layout.get(key, []):
             def mvp(dx, dy, p=p):
                 p["poly"] = affinity.translate(p["poly"], dx, dy)
                 if p.get("seam") is not None:
                     p["seam"] = affinity.translate(p["seam"], dx, dy)
-            add("arm", p.get("seam") or p["poly"], mvp)
+            add(cat, p.get("seam") or p["poly"], mvp)
 
     b = layout.get("base")
     if b:
@@ -86,7 +87,7 @@ def arrange_sides(layout, gap=120.0):
         return maxw, y - gap
 
     x = gap; bottom = gap
-    for group in (cats.get("arm", []),
+    for group in (cats.get("arm_spare", []) + cats.get("arm_main", []),
                   cats.get("strip_left", []),
                   cats.get("front", []) + cats.get("back", []),
                   cats.get("strip_right", [])):
@@ -98,6 +99,61 @@ def arrange_sides(layout, gap=120.0):
     base = cats.get("base", []) + cats.get("leg", [])            # днище+ножка — внизу по центру, в ряд
     if base:
         bx = gap; by = bottom + gap
+        for it in base:
+            it["mv"](bx - it["x"], by - it["y"]); bx += it["w"] + gap
+        bottom = by + max(it["h"] for it in base)
+
+    layout["sheet_w"] = x + gap
+    layout["sheet_h"] = bottom + gap
+
+
+def arrange_print(layout, gap=120.0):
+    """ПЕЧАТНАЯ раскладка «в ряд» (по примеру заказчика). Колонки слева направо:
+    [запасная рука] [рука] [левые боковины] [ПЕРЁД] [правые боковины] [ЗАД];
+    днище+ножка — внизу по центру. Руки двигаются ЦЕЛЫМ блоком (сохраняют свой вид:
+    кисти рядом, предплечье/плечо/база стопкой). Боковины — каждая своей стопкой."""
+    items = _movables(layout)
+    cats = {}
+    for it in items:
+        cats.setdefault(it["cat"], []).append(it)
+
+    def bbox(lst):
+        return (min(it["x"] for it in lst), min(it["y"] for it in lst),
+                max(it["x"] + it["w"] for it in lst), max(it["y"] + it["h"] for it in lst))
+
+    def place_blocks(blocks, x, y0=gap):
+        """blocks — список блоков; блок = список items, двигается как единое целое. Стопка сверху вниз."""
+        y, maxw = y0, 0.0
+        for blk in blocks:
+            if not blk:
+                continue
+            bx0, by0, bx1, by1 = bbox(blk)
+            for it in blk:                                            # весь блок — на одну дельту (вид сохраняется)
+                it["mv"](x - bx0, y - by0)
+            y += (by1 - by0) + gap; maxw = max(maxw, bx1 - bx0)
+        return maxw, y - gap
+
+    # колонки: руки — ОДИН блок каждая; боковины/перёд/зад — по одному элементу-блоку
+    columns = [
+        [cats.get("arm_spare", [])] if cats.get("arm_spare") else [],   # запасная рука (блок)
+        [cats.get("arm_main", [])] if cats.get("arm_main") else [],     # рука (блок)
+        [[it] for it in cats.get("strip_left", [])],                    # левые боковины (стопка)
+        [[it] for it in cats.get("front", [])],                         # ПЕРЁД
+        [[it] for it in cats.get("strip_right", [])],                   # правые боковины (стопка)
+        [[it] for it in cats.get("back", [])],                          # ЗАД
+    ]
+    x, bottom = gap, gap
+    for col in columns:
+        if not col:
+            continue
+        w, yb = place_blocks(col, x)
+        if w > 0:
+            x += w + gap; bottom = max(bottom, yb)
+
+    base = cats.get("base", []) + cats.get("leg", [])                   # днище+ножка — внизу по центру, в ряд
+    if base:
+        total = sum(it["w"] for it in base) + gap * (len(base) - 1)
+        bx = max(gap, (x - total) / 2.0); by = bottom + gap
         for it in base:
             it["mv"](bx - it["x"], by - it["y"]); bx += it["w"] + gap
         bottom = by + max(it["h"] for it in base)

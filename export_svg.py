@@ -157,6 +157,9 @@ def build_layout(page, cfg):
     if cfg.get("roll_pack"):                                     # nesting в рулон (высота = ширина рулона)
         from pack import nest_roll
         nest_roll(lay, roll_h=cfg.get("roll_width_mm", 1440), gap=cfg.get("roll_gap_mm", 2 * seam_mm + 10))
+    elif cfg.get("print_arrange"):                              # печать «в ряд»: запаска|рука|лев|ПЕРЁД|прав|ЗАД, днище вниз
+        from pack import arrange_print
+        arrange_print(lay, gap=2 * seam_mm + 100)
     elif cfg.get("arrange_sides"):                               # колонки: руки|левые|перёд+зад|правые, днище внизу
         from pack import arrange_sides
         arrange_sides(lay, gap=2 * seam_mm + 100)
