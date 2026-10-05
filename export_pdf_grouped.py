@@ -20,16 +20,130 @@ def _circle(cx, cy, r, stroke, sw):
     return f'<circle cx="{cx:.3f}" cy="{cy:.3f}" r="{r:.3f}" fill="none" stroke="{stroke}" stroke-width="{sw:.3f}"/>'
 
 
+def _bez(p0, p1, p2, p3, n=6):
+    """Точки кубической кривой Безье (сэмплинг для перевода текстуры в полигоны)."""
+    out = []
+    for k in range(1, n + 1):
+        t = k / n; mt = 1 - t
+        x = mt**3 * p0[0] + 3 * mt**2 * t * p1[0] + 3 * mt * t**2 * p2[0] + t**3 * p3[0]
+        y = mt**3 * p0[1] + 3 * mt**2 * t * p1[1] + 3 * mt * t**2 * p2[1] + t**3 * p3[1]
+        out.append((x, y))
+    return out
+
+
+def _subpaths(dd, tf):
+    """Подпути пути макета как списки точек (кривые Безье сэмплятся), координаты tf(pt)->мм."""
+    subs, pts, cur = [], [], None
+    P = lambda p: tf(p.x, p.y)
+    def flush():
+        if len(pts) >= 2:
+            subs.append(list(pts))
+    for it in dd["items"]:
+        k = it[0]
+        if k == "l":
+            a, b = P(it[1]), P(it[2])
+            if cur != it[1]:
+                flush(); pts.clear(); pts.append(a)
+            pts.append(b); cur = it[2]
+        elif k == "c":
+            p0, p1, p2, p3 = P(it[1]), P(it[2]), P(it[3]), P(it[4])
+            if cur != it[1]:
+                flush(); pts.clear(); pts.append(p0)
+            pts.extend(_bez(p0, p1, p2, p3)); cur = it[4]
+        elif k == "re":
+            r = it[1]; c = [tf(r.x0, r.y0), tf(r.x1, r.y0), tf(r.x1, r.y1), tf(r.x0, r.y1)]
+            flush(); pts.clear(); subs.append(c + [c[0]]); cur = None
+        elif k == "qu":
+            q = it[1]; c = [tf(q.ul.x, q.ul.y), tf(q.ur.x, q.ur.y), tf(q.lr.x, q.lr.y), tf(q.ll.x, q.ll.y)]
+            flush(); pts.clear(); subs.append(c + [c[0]]); cur = None
+    flush()
+    return subs
+
+
+def _ring_d(coords):
+    return "M " + " L ".join(f"{x:.3f},{y:.3f}" for x, y in coords) + " Z"
+
+
+def _fill_path(geom, fill):
+    """Polygon/MultiPolygon -> SVG path (с дырами, fill-rule evenodd)."""
+    polys = list(geom.geoms) if geom.geom_type in ("MultiPolygon", "GeometryCollection") else [geom]
+    ds = []
+    for p in polys:
+        if getattr(p, "geom_type", "") != "Polygon" or p.is_empty:
+            continue
+        ds.append(_ring_d(list(p.exterior.coords)))
+        for r in p.interiors:
+            ds.append(_ring_d(list(r.coords)))
+    return f'<path d="{" ".join(ds)}" fill="{fill}" fill-rule="evenodd"/>' if ds else None
+
+
+def _stroke_paths(geom, stroke, sw):
+    """LineString/MultiLineString -> SVG обводки."""
+    lines = []
+    def add(g):
+        t = getattr(g, "geom_type", "")
+        if t == "LineString" and len(g.coords) >= 2:
+            lines.append(list(g.coords))
+        elif t in ("MultiLineString", "GeometryCollection"):
+            for gg in g.geoms:
+                add(gg)
+    add(geom)
+    out = []
+    for c in lines:
+        d = "M " + " L ".join(f"{x:.3f},{y:.3f}" for x, y in c)
+        out.append(f'<path d="{d}" fill="none" stroke="{stroke}" stroke-width="{sw:.3f}"/>')
+    return out
+
+
+def _design_clipped(dds, tf, f_mm, contour, title):
+    """Текстура макета, ГЕОМЕТРИЧЕСКИ ОБРЕЗАННАЯ по контуру детали (всё снаружи удалено).
+    Заливки: even-odd регион = XOR подпутей, пересечённый с контуром. Обводки: клип ломаных.
+    Надёжнее clipPath (Corel игнорирует clip при импорте -> текстура вылезала за контур)."""
+    from shapely.geometry import Polygon, LineString
+    cp = contour.buffer(0)
+    out = [f'<g id="{title}">']
+    for dd in dds:
+        subs = _subpaths(dd, tf)
+        if not subs:
+            continue
+        if dd.get("fill"):
+            region = None
+            for s in subs:
+                if len(s) >= 3:
+                    try:
+                        poly = Polygon(s).buffer(0)
+                    except Exception:
+                        continue
+                    if poly.is_empty:
+                        continue
+                    region = poly if region is None else region.symmetric_difference(poly)
+            if region is not None and not region.is_empty:
+                clipped = region.intersection(cp)
+                if not clipped.is_empty:
+                    el = _fill_path(clipped, HEX(tuple(int(255 * v) for v in dd["fill"])))
+                    if el:
+                        out.append(el)
+        if dd.get("color"):
+            stroke = HEX(tuple(int(255 * v) for v in dd["color"]))
+            sw = max(dd.get("width", 0.3) * f_mm, 0.05)
+            for s in subs:
+                ci = LineString(s).intersection(cp)
+                if not ci.is_empty:
+                    out += _stroke_paths(ci, stroke, sw)
+    out.append("</g>")
+    return "\n".join(out)
+
+
 def _hand_tex(poly, src, arm_dds, f_mm, cid):
-    """Текстура кисти через аффин src(pt)->poly, обрезанная по контуру детали."""
+    """Текстура кисти через аффин src(pt)->poly, ГЕОМЕТРИЧЕСКИ обрезанная по контуру кисти
+    (всё снаружи удалено — надёжнее clipPath, который Corel игнорирует при импорте)."""
     s = np.asarray(src, float); dst = np.array(poly.exterior.coords[:-1])
     if len(s) != len(dst):
         return []
     Mx = np.hstack([s, np.ones((len(s), 1))])
     ax = np.linalg.lstsq(Mx, dst[:, 0], rcond=None)[0]; ay = np.linalg.lstsq(Mx, dst[:, 1], rcond=None)[0]
-    return [f'<clipPath id="{cid}">' + _poly(list(poly.exterior.coords), fill="#000", stroke="none", sw=0) + '</clipPath>',
-            f'<g clip-path="url(#{cid})">'
-            + _design_group(arm_dds, lambda x, y: (ax @ [x, y, 1.0], ay @ [x, y, 1.0]), f_mm, "fist") + '</g>']
+    tf = lambda x, y: (float(ax @ [x, y, 1.0]), float(ay @ [x, y, 1.0]))
+    return [_design_clipped(arm_dds, tf, f_mm, poly, "fist")]
 
 
 def _piece_svg(p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill="#f5f5f5"):
@@ -94,11 +208,14 @@ def main():
 
     # фильтр заливок: оставить те, чей центр ВНУТРИ обрезанного контура (без руки) — убирает
     # текстуру отрезанной руки БЕЗ clipPath (clipPath заставляет cairosvg растеризовать -> 180MB).
-    from shapely.geometry import Point as _Pt
+    from shapely.geometry import Point as _Pt, box as _box
     from shapely.prepared import prep as _prep
     def _inside_fills(dds, poly_pt):
         pp = _prep(poly_pt.buffer(2))
         return [dd for dd in dds if pp.contains(_Pt((dd["rect"].x0 + dd["rect"].x1) / 2, (dd["rect"].y0 + dd["rect"].y1) / 2))]
+    def _near_fills(dds, poly_pt):                                     # заливки, чей bbox ПЕРЕСЕКАЕТ контур
+        pp = _prep(poly_pt)                                            # (вкл. пограничные — для чистой обрезки)
+        return [dd for dd in dds if pp.intersects(_box(dd["rect"].x0, dd["rect"].y0, dd["rect"].x1, dd["rect"].y1))]
 
     # КЛЮЧ СБОРКИ: дуги стыков с боковинами — цвет = цвет боковины. Подсветка лежит В КОЛЬЦЕ
     # ПРИПУСКА (смещена НАРУЖУ на ~половину припуска, ширина < припуска) — НЕ заходит за контур
@@ -139,19 +256,19 @@ def main():
         out.append("</g>")
         return "\n".join(out)
 
-    # ПЕРЁД (текстура без руки + контур + припуск + цветной ключ-полоска — всё в одной группе)
-    fr_in = _inside_fills(front_drawings(page, cfg)[0], fig.contour_pt)
-    pieces.append(("front", [_design_group(fr_in, _tex_tf(contour_mm, lay["front"], f_mm), f_mm, "front_tex"),
+    # ПЕРЁД (текстура ОБРЕЗАНА по контуру + контур + припуск + цветной ключ-полоса — одна группа)
+    fr_in = _near_fills(front_drawings(page, cfg)[0], fig.contour_pt)
+    pieces.append(("front", [_design_clipped(fr_in, _tex_tf(contour_mm, lay["front"], f_mm), f_mm, lay["front"], "front_tex"),
                              _poly(list(lay["front"].exterior.coords), stroke="#000", sw=lw),
                              _poly(list(lay["front_seam"].exterior.coords), stroke="#dc0000", sw=lw),
                              _arc_paths(front_arcs, lay["front"], "seam_front")]))
 
-    # ЗАД (текстура без руки + контур + припуск + ключ-полоска зеркально — всё в одной группе)
+    # ЗАД (текстура ОБРЕЗАНА по контуру + контур + припуск + ключ-полоса зеркально — одна группа)
     bk = lay.get("back")
     if bk:
         from sides import back_drawings
-        bk_in = _inside_fills(back_drawings(page, cfg)[0], bk["cut_pt"]) if bk.get("cut_pt") else back_drawings(page, cfg)[0]
-        bbody = [_design_group(bk_in, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["f_mm"], "back_tex"),
+        bk_in = _near_fills(back_drawings(page, cfg)[0], bk["cut_pt"]) if bk.get("cut_pt") else back_drawings(page, cfg)[0]
+        bbody = [_design_clipped(bk_in, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["f_mm"], bk["poly"], "back_tex"),
                  _poly(list(bk["poly"].exterior.coords), stroke="#000", sw=lw)]
         if bk.get("seam"):
             bbody.append(_poly(list(bk["seam"].exterior.coords), stroke="#dc0000", sw=lw))
