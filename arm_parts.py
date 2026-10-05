@@ -33,7 +33,7 @@ def main():
     for a in cut:
         arm_poly = Polygon(a["poly_pt"]) if not hasattr(a["poly_pt"], "exterior") else a["poly_pt"]
         arr = np.asarray(arm_poly.exterior.coords[:-1], float)
-        wrist, tip, _ = _wrist_on_poly(page, arr, a["tip"], cfg)
+        wrist, tip, _ = _wrist_on_poly(page, arr, a["tip"], cfg, armpit=a.get("f"))
         hand_pts, rest_pts = cut_arm(arr, wrist, tip)                 # КИСТЬ | (предплечье+плечо)
         elbow, fore_c, sh_c = _arm_zone_colors(page, arm_poly, arr, wrist, tip, cfg, armpit=a.get("f"))
         wmid = (np.asarray(wrist[0], float) + np.asarray(wrist[1], float)) / 2.0

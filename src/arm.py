@@ -951,17 +951,19 @@ def _wrist_score(arm_arr, wrist, tip, scale):
     return ok, straight, fore_top, W, hand_pts, fore_pts
 
 
-def _wrist_on_poly(page, arm_pt, tip, cfg):
+def _wrist_on_poly(page, arm_pt, tip, cfg, armpit=None):
     """Запястье на НАШЕМ полигоне руки. Берём tip из detect_armpits (авторитетный кончик
-    кисти). Пробуем ОБА метода — по ЦВЕТУ (светлая перчатка↔рукав) и по выпуклости
-    (convexity) — и выбираем валидный (W>0, кисть у кончика). Возвращает (wrist, tip, method)."""
+    кисти). Пробуем ОБА метода — по ЦВЕТУ (светлая перчатка↔рукав) и по выпuклости
+    (convexity) — и выбираем валидный (W>0, кисть у кончика). Возвращает (wrist, tip, method).
+    armpit (a["f"]) задаёт ОСЬ руки для профиля ширины (hand→подмышка): инвариант к форме
+    среза плеча, иначе ось берётся из PCA полигона и «едет» при смене реза (клин у запястья)."""
     A = np.asarray(arm_pt, float)
     tip = tuple(np.asarray(tip, float))
     scale = 1.0  # масштаб не важен для относительной валидации (W>0 инвариантен к scale)
     cands = []
     # 0) по ПРОФИЛЮ ШИРИНЫ (режем на запястье = минимум после ладони) — ОСНОВНОЙ метод
     try:
-        ww = _wrist_by_width(Polygon(A), tip, cfg.get("_armpit_f"), cfg)
+        ww = _wrist_by_width(Polygon(A), tip, armpit if armpit is not None else cfg.get("_armpit_f"), cfg)
     except Exception:
         ww = None
     if ww is not None:
@@ -1018,7 +1020,7 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None):
     arm_arr = np.asarray(arm_poly.exterior.coords[:-1], float)       # PT, замкнут -> без дубля
 
     # 1) запястье + рез на (кисть, предплечье) — ТОЛЬКО для получения формы кисти
-    wrist, tip_used, wmethod = _wrist_on_poly(page, arm_arr, tip, cfg)
+    wrist, tip_used, wmethod = _wrist_on_poly(page, arm_arr, tip, cfg, armpit=armpit)
     hand_pts, fore_pts = cut_arm(arm_arr, wrist, tip_used)
 
     # 2) ЭТАЛОННАЯ рука (фикс. шаблон 2700, Ø250): база/плечо/предплечье

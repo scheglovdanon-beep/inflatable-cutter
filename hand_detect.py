@@ -43,7 +43,7 @@ def main():
     for i, a in enumerate(arms):
         arm_poly = a["poly"]; tip = a["tip"]
         arm_arr = np.asarray(arm_poly.exterior.coords[:-1], float)
-        wrist, tip_used, method = _wrist_on_poly(page, arm_arr, tip, cfg)
+        wrist, tip_used, method = _wrist_on_poly(page, arm_arr, tip, cfg, armpit=a.get("f"))
         hand_pts, fore_pts = cut_arm(arm_arr, wrist, tip_used)
 
         # текстура руки (заливки макета в bbox руки), клип по контуру руки
