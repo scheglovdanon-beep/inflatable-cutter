@@ -512,9 +512,9 @@ def detect_arms_v2(page, body, cfg):
     max_arm = cfg.get("arm_max_frac", 0.35) * body.area
     min_arm = cfg.get("armpit_min_arm_frac", 0.015) * body.area
     offs = cfg.get("arm_vcut_offsets_pt", [6, 10, 16, 22, 30])      # сдвиг вертикали внутрь руки от подмышки
-    exp = cfg.get("expected_arms"); maxn = cfg.get("max_arms", 2)
+    exp = cfg.get("expected_arms") or 1                             # по умолчанию 1 рука; 2 — только если явно задано
     arms, cur = [], body
-    for _ in range(maxn):
+    for _ in range(exp):
         axx = cur.centroid.x; b = cur.bounds
         cons = sorted(_contour_concavities(cur, cfg), key=lambda t: -t[2])  # глубочайшие вогнутости — первыми
         found = None
