@@ -1,6 +1,6 @@
-0.0s open
-1.2s front_drawings 255
-1.6s boundary pts=140
-2.1s detect arms=1
-  f (209, 294) tip (66, 185) frac 0.077
-2.2s saved out/_m4_rtex.png
+concavities (x,y,depth):
+ 0 (333,583) d=348
+ 1 (636,710) d=311
+ 2 (388,1247) d=162
+ 3 (279,505) d=56
+DONE

@@ -33,6 +33,4 @@ ext=[T(x,y) for x,y in bound.exterior.coords];dr.line(ext+[ext[0]],fill=(0,80,25
 for a in arms:
     ap=[T(x,y) for x,y in a["poly_pt"].exterior.coords];dr.line(ap+[ap[0]],fill=(220,0,0),width=4)  # рука — красным
     f=a["f"];fx,fy=T(*f);dr.ellipse([fx-9,fy-9,fx+9,fy+9],outline=(0,200,0),width=4)                 # подмышка — зел
-    abx=a["poly_pt"].bounds;cx=abx[0] if abs(abx[0]-f[0])<abs(abx[2]-f[0]) else abx[2]
-    x1,y1=T(cx,abx[1]);x2,y2=T(cx,abx[3]);dr.line([(x1,y1),(x2,y2)],fill=(255,0,255),width=4)         # рез — магента
 im.save(out);L("saved "+out)

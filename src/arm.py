@@ -554,6 +554,30 @@ def detect_arms_v2(page, body, cfg):
                         best = (armp, restp, tip)
                 if best is not None:
                     found = (best[0], [best[0], best[1]], (fx, fy), best[2])
+                    root_r = cfg.get("arm_root_pair_frac", 0.38) * max(b[2] - b[0], b[3] - b[1])
+                    lower = None; lbest = 1e18                       # перенос подмышки на НИЖНИЙ угол корня (торс->рука)
+                    for (gx, gy, gd) in cons:                        # парный угол = БЛИЖАЙШАЯ вогнутость ниже верхнего
+                        if gy <= fy + 2:
+                            continue
+                        dd2 = np.hypot(gx - fx, gy - fy)
+                        if dd2 > root_r:
+                            continue
+                        if dd2 < lbest:
+                            lbest = dd2; lower = (gx, gy)
+                    if lower is not None:                            # рез ХОРДОЙ верхний_угол<->нижняя_подмышка
+                        exc = cur.exterior
+                        a = np.asarray(exc.interpolate(exc.project(Point(fx, fy))).coords[0], float)
+                        c = np.asarray(exc.interpolate(exc.project(Point(*lower))).coords[0], float)
+                        dv = c - a; nn = np.hypot(*dv)
+                        if nn > 1:
+                            dv = dv / nn
+                            pr = list(getattr(split(cur, LineString([tuple(a - dv * 40), tuple(c + dv * 40)])), "geoms", [cur]))
+                            thand = Point(*best[2])                   # кисть уже найдена перп-резом -> не перепроверяем
+                            for cand in sorted(pr, key=lambda p: p.area):
+                                if not (min_arm <= cand.area <= max_arm):
+                                    continue
+                                if cand.distance(thand) < 5:          # кусок хорды, содержащий кисть = рука
+                                    found = (cand, pr, (float(lower[0]), float(lower[1])), best[2]); break
             if found:
                 break
         if not found:
