@@ -352,16 +352,25 @@ def main():
 
     all_dds = [dd for dd in page.get_drawings()
                if dd.get("fill") is not None or dd.get("color") is not None]
-    def _dds_for_src(src_pts):                                     # заливки макета в bbox куска (по его src)
-        s = np.asarray(src_pts, float)
-        x0, y0, x1, y1 = s[:, 0].min(), s[:, 1].min(), s[:, 0].max(), s[:, 1].max()
-        return [dd for dd in all_dds if (dd["rect"].x0 >= x0 - 2 and dd["rect"].x1 <= x1 + 2
-                                         and dd["rect"].y0 >= y0 - 2 and dd["rect"].y1 <= y1 + 2)]
+    _pr = page.rect; _pa = (_pr.width * _pr.height) or 1.0; _bgf = cfg.get("bg_page_frac", 0.95)
+    def _dds_for_src(src_pts):                                     # заливки макета, чей bbox ПЕРЕСЕКАЕТ bbox куска
+        s = np.asarray(src_pts, float)                            # (пересечение, не «целиком внутри» — иначе заливка
+        x0, y0, x1, y1 = s[:, 0].min(), s[:, 1].min(), s[:, 0].max(), s[:, 1].max()  # ладони/контур, чуть вылезающие
+        def ok(dd):                                               # за тугой bbox, терялись); обрежет _design_clipped
+            r = dd["rect"]
+            if (r.x1 - r.x0) * (r.y1 - r.y0) >= _bgf * _pa:       # фон во всю страницу -> выкинуть
+                return False
+            return not (r.x1 < x0 - 2 or r.x0 > x1 + 2 or r.y1 < y0 - 2 or r.y0 > y1 + 2)
+        return [dd for dd in all_dds if ok(dd)]
     arm_dds = []
     if arm_pts is not None:
         A = arm_pts; abx0, aby0, abx1, aby1 = A[:, 0].min(), A[:, 1].min(), A[:, 0].max(), A[:, 1].max()
-        inbb = lambda r: r.x0 >= abx0 - 2 and r.x1 <= abx1 + 2 and r.y0 >= aby0 - 2 and r.y1 <= aby1 + 2
-        arm_dds = [dd for dd in all_dds if inbb(dd["rect"])]
+        def _inarm(dd):                                           # bbox ПЕРЕСЕКАЕТ bbox руки (не «целиком внутри»):
+            r = dd["rect"]                                        # заливка ладони/контур, вылезающие за тугой bbox,
+            if (r.x1 - r.x0) * (r.y1 - r.y0) >= _bgf * _pa:       # не терялись; фон во всю страницу выкидываем
+                return False
+            return not (r.x1 < abx0 - 2 or r.x0 > abx1 + 2 or r.y1 < aby0 - 2 or r.y0 > aby1 + 2)
+        arm_dds = [dd for dd in all_dds if _inarm(dd)]
     from side_color import arm_fill_color, base_fill_color                    # цвета руки/днища по 2D
     from sides import get_arm_contour
     arm_fill = HEX(arm_fill_color(page, arm_pts if arm_pts is not None else get_arm_contour(page)[0])) \
