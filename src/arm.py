@@ -452,19 +452,23 @@ def _contour_concavities(body, cfg):
 
 
 def _arm_has_hand(page, arm_poly, cfg):
-    """ВАЛИДАЦИЯ: есть ли в срезанном куске кисть. Нет кисти -> это не рука (ложный срез)."""
+    """ВАЛИДАЦИЯ: есть ли в срезанном куске кисть. Нет кисти -> это не рука (ложный срез).
+    ТОЛЬКО геометрия (профиль ширины) — без растрового детекта по цвету (тот жрал память -> OOM)."""
+    from shapely.geometry import Polygon as _P
     arr = np.asarray(arm_poly.exterior.coords[:-1], float)
     if len(arr) < 4:
         return False, None, None
     cen = np.asarray(arm_poly.centroid.coords[0], float)
-    tip = arr[int(np.argmax(np.hypot(arr[:, 0] - cen[0], arr[:, 1] - cen[1])))]  # дальняя точка = кисть
+    tip = tuple(arr[int(np.argmax(np.hypot(arr[:, 0] - cen[0], arr[:, 1] - cen[1])))])  # дальняя точка = кисть
     try:
-        wrist, tipu, _m = _wrist_on_poly(page, arr, tuple(tip), cfg)
-        sc = _wrist_score(arr, wrist, tuple(tipu), 1.0)
+        ww = _wrist_by_width(_P(arr), tip, None, cfg)                # геометрия, без растра
+        if ww is None:
+            return False, None, None
+        sc = _wrist_score(arr, [tuple(ww[0]), tuple(ww[1])], tip, 1.0)
     except Exception:
         return False, None, None
     ok = sc is not None and sc[0]
-    return bool(ok), tuple(tipu), wrist
+    return bool(ok), tip, [tuple(ww[0]), tuple(ww[1])]
 
 
 def _skeleton_arm_candidates(body, cfg):
