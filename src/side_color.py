@@ -138,10 +138,13 @@ def posterize_arr(arr, ncolors=64):
     return newpal[lbl].astype(np.uint8)
 
 
-def front_raster(page, front_drawings_fn, zoom=2.0, mg=6):
+def front_raster(page, front_drawings_fn, zoom=None, mg=6):
     """Реконструкция переда из векторных заливок в растр (pt-координаты).
     Возвращает (arr, bx0, by0, Z, mg). zoom=2 достаточно для сэмпла доминирующих цветов
-    (при zoom=4 растр в 4× больше и медленнее). Кэшируется на page."""
+    (при zoom=4 растр в 4× больше и медленнее). Кэшируется на page.
+    zoom=None -> берётся raster_zoom из cfg (деф. 2.0) — меньше растр = меньше памяти."""
+    if zoom is None:
+        zoom = (getattr(page, "_cfg", None) or {}).get("raster_zoom", 2.0) or 2.0
     cache = getattr(page, "_raster_cache", None)
     if cache is not None and cache[0] == (zoom, mg):
         return cache[1]

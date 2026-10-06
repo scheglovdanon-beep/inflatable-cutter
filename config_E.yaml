@@ -67,3 +67,8 @@ armpit_center_frac: 0.08
 # подмышка: опускать f в НИЖНЮЮ вогнутость основания руки (вся рука целиком)
 armpit_pair_local_frac: 0.9      # радиус поиска нижней подмышки = доля длины вылета руки
 armpit_refine_aspect_relax: 0.7  # послабление min_aspect при проверке опущенной подмышки
+# --- оптимизация памяти (OOM-фикс) ---
+free_poly_cache: true
+union_batch_size: 300
+raster_zoom: 1.5
+arm_raster_z: 3.0

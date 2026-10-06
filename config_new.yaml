@@ -77,3 +77,8 @@ arm_template: true
 accent_sat_min: 0.15
 # скопления мелких цветных зон (< доли длины полосы) схлопывать в один доминирующий цвет
 band_merge_small_frac: 0.12
+# --- оптимизация памяти (OOM-фикс) ---
+free_poly_cache: true
+union_batch_size: 300
+raster_zoom: 1.5
+arm_raster_z: 3.0

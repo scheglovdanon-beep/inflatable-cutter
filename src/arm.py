@@ -1007,7 +1007,7 @@ def detect_wrist_color(page, arm_pt, cfg):
     A = np.asarray(arm_pt, float); nA = len(A)
     bx0, by0, bx1, by1 = A[:, 0].min(), A[:, 1].min(), A[:, 0].max(), A[:, 1].max()
     inbb = lambda r: r.x0 >= bx0 - 2 and r.x1 <= bx1 + 2 and r.y0 >= by0 - 2 and r.y1 <= by1 + 2
-    Z, mg = 5.0, 10
+    Z, mg = (cfg or {}).get("arm_raster_z", 5.0), 10               # меньше растр руки = меньше памяти
     Wp, Hp = int((bx1 - bx0 + 2 * mg) * Z), int((by1 - by0 + 2 * mg) * Z)
     from PIL import Image, ImageDraw
     tex = Image.new("RGB", (Wp, Hp), (255, 255, 255)); dtx = ImageDraw.Draw(tex)

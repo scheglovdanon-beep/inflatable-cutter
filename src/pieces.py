@@ -75,7 +75,7 @@ class Figure:
     def out_h_mm(self): return self.out_h_pt * PT2MM
 
 
-def build_contour(drawings, gap_mm: float, target_height_mm: float, exclude_outline: bool = False):
+def build_contour(drawings, gap_mm: float, target_height_mm: float, exclude_outline: bool = False, cfg=None):
     """union заливок -> закрытие щелей buffer(+g).buffer(-g) -> один Polygon без дыр.
     Контур строится «в финальном масштабе»: зазор g пересчитан так, чтобы после
     увеличения фигуры до target_height_mm он равнялся ровно gap_mm (в реальных мм).
@@ -91,7 +91,14 @@ def build_contour(drawings, gap_mm: float, target_height_mm: float, exclude_outl
     polys = [p for p in (_poly_of(d) for d in drawings if _keep(d)) if p]
     if not polys:
         raise ValueError("нет заливок для контура")
-    u = unary_union(polys)
+    bs = (cfg or {}).get("union_batch_size", 0)                  # батчевый union: меньше пик памяти
+    if bs and len(polys) > bs:                                   # (результат идентичен — union ассоциативен)
+        import gc
+        parts = [unary_union(polys[i:i + bs]) for i in range(0, len(polys), bs)]
+        u = unary_union(parts)
+        del parts; gc.collect()
+    else:
+        u = unary_union(polys)
     y0, y1 = u.bounds[1], u.bounds[3]
     s = (target_height_mm * MM2PT) / (y1 - y0)    # масштаб pt->pt к финалу
     g = gap_mm * MM2PT / s                         # зазор в исходных pt, чтобы в финале = gap_mm
@@ -103,8 +110,8 @@ def build_contour(drawings, gap_mm: float, target_height_mm: float, exclude_outl
     return contour, u, n_parts, bool(contour.is_valid)
 
 
-def build_figure(side, drawings, page_H, target_height_mm, gap_mm, exclude_outline=False) -> Figure:
-    contour, union, n_parts, valid = build_contour(drawings, gap_mm, target_height_mm, exclude_outline)
+def build_figure(side, drawings, page_H, target_height_mm, gap_mm, exclude_outline=False, cfg=None) -> Figure:
+    contour, union, n_parts, valid = build_contour(drawings, gap_mm, target_height_mm, exclude_outline, cfg)
     outside_pt2 = union.difference(contour).area          # макет вне контура (в pt^2)
     return Figure(side=side, drawings=drawings, contour_pt=contour, page_H=page_H,
                   target_height_mm=target_height_mm, n_parts=n_parts, is_valid=valid,

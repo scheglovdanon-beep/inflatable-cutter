@@ -22,7 +22,7 @@ def _fist_texture(page, arm_pts):
     A = arm_pts; bx0, by0 = A[:, 0].min(), A[:, 1].min()
     bx1, by1 = A[:, 0].max(), A[:, 1].max()
     inbb = lambda r: r.x0 >= bx0 - 2 and r.x1 <= bx1 + 2 and r.y0 >= by0 - 2 and r.y1 <= by1 + 2
-    Z, mg = 5.0, 8
+    Z, mg = (getattr(page, "_cfg", None) or {}).get("arm_raster_z", 5.0), 8   # меньше растр кисти = меньше памяти
     W, H = int((bx1 - bx0 + 2 * mg) * Z), int((by1 - by0 + 2 * mg) * Z)
     img = Image.new("RGB", (W, H), (255, 255, 255)); dr = ImageDraw.Draw(img)
     col = lambda c: tuple(int(255 * v) for v in c) if c else None
@@ -101,7 +101,7 @@ def main():
                 fld.line(pts + ([pts[0]] if len(pts) >= 3 else []), fill=s, width=max(1, int(dd.get("width", .5) * f_mm * sc)))
     fmask = Image.new("L", im.size, 0)                              # обрезка текстуры по контуру (без руки)
     ImageDraw.Draw(fmask).polygon([T(x, y) for x, y in lay["front"].exterior.coords], fill=255)
-    im.paste(flayer, (0, 0), fmask)
+    im.paste(flayer, (0, 0), fmask); del flayer, fmask              # освободить полноразмерные слои
 
     # ----- ПЕРЁД: контур-шов (сплошной, 0.2мм) + подпись -----
     dr.line([T(x, y) for x, y in lay["front"].exterior.coords], fill=(0, 0, 0), width=lw)
@@ -125,7 +125,7 @@ def main():
                     bld.line(pts + ([pts[0]] if len(pts) >= 3 else []), fill=s, width=max(1, int(dd.get("width", .5) * f_mm * sc)))
         bmask = Image.new("L", im.size, 0)                         # обрезка текстуры зада по контуру (без руки)
         ImageDraw.Draw(bmask).polygon([T(x, y) for x, y in bk["poly"].exterior.coords], fill=255)
-        im.paste(blayer, (0, 0), bmask)
+        im.paste(blayer, (0, 0), bmask); del blayer, bmask         # освободить полноразмерные слои
         dr.line([T(x, y) for x, y in bk["poly"].exterior.coords], fill=(0, 0, 0), width=lw)
         label(bk["poly"], "ZAD")
 
@@ -180,7 +180,7 @@ def main():
             layer = Image.new("RGB", im.size, tuple(ap.get("fill", arm_col))); ld = ImageDraw.Draw(layer)
             for f0, f1, c in bands:                                  # f=0 у верхнего ребра детали
                 ld.rectangle([T(b[0], y0 + hpx * f0), T(b[2], y0 + hpx * f1)], fill=tuple(c))
-            im.paste(layer, (0, 0), mask)
+            im.paste(layer, (0, 0), mask); del layer, mask         # освободить слои детали руки
             dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(150, 0, 150), width=lw)
         else:
             dr.polygon([T(x, y) for x, y in poly.exterior.coords],
@@ -247,6 +247,7 @@ def main():
     for sp in lay.get("spare_arm", []):                             # ЗАПАСНАЯ РУКА (копия)
         render_piece(sp["poly"], sp["kind"], sp.get("src"), sp.get("fill"))
         label(sp["poly"], lbl(sp.get("name", "")))
+    import gc; gc.collect()                                          # освободить накопленные слои деталей
 
     # ----- ПРИПУСК НА ШОВ +Nмм: контур реза вокруг каждого лекала (сплошной, 0.2мм) -----
     from seam import add_seams, seam_rings

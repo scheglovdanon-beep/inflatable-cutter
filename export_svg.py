@@ -86,6 +86,7 @@ def build_layout(page, cfg):
     """Полная раскладка: перёд, боковины(цвет), кисть, рука, днище + припуски.
     Возвращает (lay, fig, contour_mm, g, arm_pts, seam_mm)."""
     from sides import smooth_front
+    page._cfg = cfg                                                  # для чтения raster_zoom/arm_raster_z в растрах
     if not getattr(page, "_gd_cached", False):                       # кэш get_drawings на весь прогон
         _gd = page.get_drawings(); page.get_drawings = lambda *a, **k: _gd; page._gd_cached = True
     if cfg.get("flat_colors"):                                       # боковины/днище красить из плоского варианта
@@ -131,7 +132,7 @@ def build_layout(page, cfg):
     if cfg.get("arm_cut") == "armpit":                          # разместить отрезанные руки + отверстия
         from sides import place_armpit_hole
         if cfg.get("arm_template"):                             # РУКА ПО ШАБЛОНУ: база→плечо→предплечье→кисть
-            from arm import build_arm_from_poly, place_arm, place_hand
+            from arm import build_arm_from_poly                 # place_arm/place_hand — уже на уровне модуля (не шадовить)
             scale = fig.s * PT2MM
             for i, ca in enumerate(cut_arms):
                 res = build_arm_from_poly(page, ca["poly_pt"], ca["tip"], scale, cfg, armpit=ca.get("f"))
@@ -152,6 +153,11 @@ def build_layout(page, cfg):
     if cfg.get("make_spare_arm", True) and (lay.get("arm_pieces") or lay.get("hand_pieces")):
         from arm import add_spare_arm                             # запаска — если есть детали руки (любой путь)
         add_spare_arm(lay)                                        # запасная рука (копия) — ниже всего
+    if cfg.get("free_poly_cache", True):                         # освободить ~7700×2 shapely-полигонов
+        import gc                                                 # (контуры уже построены; текстура/цвет их не трогают)
+        for d in page.get_drawings():
+            d.pop("_poly", None)
+        gc.collect()
     color_sides(lay, g, contour_mm, fig, page, front_drawings, cfg)
     seam_mm = cfg.get("seam_allowance_mm", 10)
     if cfg.get("roll_pack"):                                     # nesting в рулон (высота = ширина рулона)
