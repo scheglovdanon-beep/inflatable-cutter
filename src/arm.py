@@ -428,6 +428,86 @@ def _refine_armpit(body, base, all_f, cfg, Wb, Hb, axx, min_arm, max_arm,
     return best
 
 
+def _contour_concavities(body, cfg):
+    """Все вогнутости контура тела (x,y,depth) глубже порога — кандидаты подмышки/верха плеча."""
+    mask, _, (ox, oy) = _rasterize_body(body, close_px=int(cfg.get("armpit_close_px", 9)))
+    c = _largest_contour(mask)
+    if c is None:
+        return []
+    hull = cv2.convexHull(c, returnPoints=False)
+    try:
+        D = cv2.convexityDefects(c, hull)
+    except cv2.error:
+        return []
+    if D is None:
+        return []
+    Hb = _poly_height(body)
+    thr = cfg.get("armpit_min_depth_frac", 0.03) * Hb
+    out = []
+    for s, e, ff, depth in D.reshape(-1, 4):
+        d = depth / 256.0
+        if d >= thr:
+            out.append((float(c[int(ff)][0][0] + ox), float(c[int(ff)][0][1] + oy), d))
+    return out
+
+
+def _arm_has_hand(page, arm_poly, cfg):
+    """ВАЛИДАЦИЯ: есть ли в срезанном куске кисть. Нет кисти -> это не рука (ложный срез)."""
+    arr = np.asarray(arm_poly.exterior.coords[:-1], float)
+    if len(arr) < 4:
+        return False, None, None
+    cen = np.asarray(arm_poly.centroid.coords[0], float)
+    tip = arr[int(np.argmax(np.hypot(arr[:, 0] - cen[0], arr[:, 1] - cen[1])))]  # дальняя точка = кисть
+    try:
+        wrist, tipu, _m = _wrist_on_poly(page, arr, tuple(tip), cfg)
+        sc = _wrist_score(arr, wrist, tuple(tipu), 1.0)
+    except Exception:
+        return False, None, None
+    ok = sc is not None and sc[0]
+    return bool(ok), tuple(tipu), wrist
+
+
+def detect_arms_v2(page, body, cfg):
+    """Детект руки v2 (TZ_arm_detect_v2): вертикальный рез у корня руки (подмышка-низ + верх
+    плеча на ~одном x) + ВАЛИДАЦИЯ кистью. Нет кисти в срезе -> не рука. Режем последовательно.
+    Возвращает список {poly_pt, f, tip}."""
+    W = _poly_width(body); A0 = body.area
+    vtol = cfg.get("arm_root_x_tol_frac", 0.14) * W
+    max_arm = cfg.get("arm_max_frac", 0.35) * A0
+    min_arm = cfg.get("armpit_min_arm_frac", 0.02) * A0
+    exp = cfg.get("expected_arms")
+    arms = []
+    cur = body
+    for _ in range(cfg.get("max_arms", 2)):
+        cons = _contour_concavities(cur, cfg)
+        best = None
+        for (fx, fy, fd) in cons:                                     # f = НИЖНЯЯ подмышка (изгиб)
+            for (gx, gy, gd) in cons:                                 # g = ВЕРХ плеча (над f, ~тот же x)
+                if gy >= fy - 1 or abs(gx - fx) > vtol:               # вертикальный корень руки
+                    continue
+                arm, rest = cut_across_arm(cur, (fx, fy), ((fx + gx) / 2, gy - 50),
+                                           cfg, blade=blade_pair((gx, gy), (fx, fy)))
+                if arm is None:
+                    continue
+                Aa = arm.area
+                if Aa < min_arm or Aa > max_arm:
+                    continue
+                ok, tip, _w = _arm_has_hand(page, arm, cfg)           # ВАЛИДАЦИЯ кистью
+                if not ok:
+                    continue
+                score = fd + gd                                       # глубже вогнутости = надёжнее
+                if best is None or score > best[0]:
+                    best = (score, arm, rest, (fx, fy), tip)
+        if best is None:
+            break
+        _s, arm, rest, f, tip = best
+        arms.append({"poly_pt": arm, "f": f, "tip": tip})
+        cur = rest
+        if exp is not None and len(arms) >= exp:
+            break
+    return arms, cur
+
+
 def cut_waving_arms(page, contour_pt, cfg, strict=True):
     """Вырезать машущие руки ОТ ПОДМЫШКИ из контура (PT). Возвращает (body_pt, cut_arms).
     При кандидатов>expected_arms оставляем самые «рукоподобные» по цвету (кожа/рукав R>>B,
@@ -449,6 +529,11 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
             body_pt = body2
             cut.append({"poly_pt": arm_poly, "f": f, "tip": tip})
         return body_pt, cut
+    if cfg.get("arm_detect_v2"):                                      # v2: вертикальный рез у корня + валидация кистью
+        arms2, body2 = detect_arms_v2(page, body_pt, cfg)
+        if strict and cfg.get("expected_arms") is not None and len(arms2) != cfg["expected_arms"]:
+            raise RuntimeError(f"v2: ожидалось {cfg['expected_arms']} рук, найдено {len(arms2)}")
+        return body2, arms2
     arms = detect_armpits(body_pt, cfg)
     exp = cfg.get("expected_arms")
     if exp is not None and len(arms) > exp:
