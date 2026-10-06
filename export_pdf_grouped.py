@@ -99,11 +99,31 @@ def _design_clipped(dds, tf, f_mm, contour, title):
     """Текстура макета, ГЕОМЕТРИЧЕСКИ ОБРЕЗАННАЯ по контуру детали (всё снаружи удалено).
     Заливки: even-odd регион = XOR подпутей, пересечённый с контуром. Обводки: клип ломаных.
     Надёжнее clipPath (Corel игнорирует clip при импорте -> текстура вылезала за контур)."""
-    from shapely.geometry import Polygon, LineString
+    from shapely.geometry import Polygon, LineString, box as _box
+    from shapely.prepared import prep
+    from export_svg import _path_d
     cp = contour.buffer(0)
+    pp = prep(cp)
     out = [f'<g id="{title}">']
     for dd in dds:
-        subs = _subpaths(dd, tf)
+        r = dd.get("rect")                                            # быстрый путь: bbox детали vs контур
+        if r is not None:
+            cs = [tf(r.x0, r.y0), tf(r.x1, r.y0), tf(r.x1, r.y1), tf(r.x0, r.y1)]
+            xs = [c[0] for c in cs]; ys = [c[1] for c in cs]
+            bb = _box(min(xs), min(ys), max(xs), max(ys))
+            if not pp.intersects(bb):
+                continue                                             # целиком снаружи -> выкинуть
+            if pp.contains(bb):                                       # целиком внутри -> отдать как есть (кривые, без shapely)
+                d = _path_d(dd, tf)
+                if d:
+                    fl = HEX(tuple(int(255 * v) for v in dd["fill"])) if dd.get("fill") else "none"
+                    if dd.get("color"):
+                        st = HEX(tuple(int(255 * v) for v in dd["color"])); sw = max(dd.get("width", 0.3) * f_mm, 0.05)
+                        out.append(f'<path d="{d}" fill="{fl}" fill-rule="evenodd" stroke="{st}" stroke-width="{sw:.3f}"/>')
+                    else:
+                        out.append(f'<path d="{d}" fill="{fl}" fill-rule="evenodd"/>')
+                continue
+        subs = _subpaths(dd, tf)                                      # пограничный -> геометрическая обрезка
         if not subs:
             continue
         if dd.get("fill"):

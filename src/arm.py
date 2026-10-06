@@ -436,6 +436,19 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
     if cfg.get("arm_cut") != "armpit":
         return contour_pt, []
     body_pt = contour_pt
+    man = cfg.get("manual_arms")                                      # [{f:[x,y], tip:[x,y]}] — ручной рез
+    if man:                                                           # (когда подмышки нет в силуэте: рука примыкает гладко)
+        cut = []
+        for m in man:
+            f = tuple(m["f"]); tip = tuple(m["tip"])
+            arm_poly, body2 = cut_across_arm(body_pt, f, tip, cfg, blade=m.get("blade"))
+            if arm_poly is None:
+                if strict:
+                    raise RuntimeError(f"ручной рез руки не удался (f={f}, tip={tip})")
+                continue
+            body_pt = body2
+            cut.append({"poly_pt": arm_poly, "f": f, "tip": tip})
+        return body_pt, cut
     arms = detect_armpits(body_pt, cfg)
     exp = cfg.get("expected_arms")
     if exp is not None and len(arms) > exp:
