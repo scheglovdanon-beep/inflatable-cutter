@@ -513,7 +513,7 @@ def detect_arms_v2(page, body, cfg):
     рука). Возвращает (список {poly_pt, f, tip}, остаточное тело)."""
     from shapely.geometry import LineString, Point
     from shapely.ops import split, unary_union
-    max_arm = cfg.get("arm_max_frac", 0.35) * body.area
+    max_arm = cfg.get("arm_detect_max_frac", 0.30) * body.area      # строгий лимит детекта (не из manual arm_max_frac)
     min_arm = cfg.get("armpit_min_arm_frac", 0.015) * body.area
     offs = cfg.get("arm_vcut_offsets_pt", [6, 10, 16, 22, 30])      # сдвиг вертикали внутрь руки от подмышки
     exp = cfg.get("expected_arms") or 1                             # по умолчанию 1 рука; 2 — только если явно задано
@@ -539,6 +539,21 @@ def detect_arms_v2(page, body, cfg):
                         found = (arm, parts, (fx, fy), tip); break
                 if found:
                     break
+            if not found and cfg.get("arm_vcut_perp_fallback", True):   # ПОДНЯТЫЕ вверх руки: перпендикуляр к оси
+                reach = cfg.get("arm_perp_min_reach_frac", 0.15) * max(b[2] - b[0], b[3] - b[1])
+                hull = np.asarray(cur.convex_hull.exterior.coords[:-1], float)
+                best = None                                             # берём НАИМЕНЬШУЮ валидную руку (не кусок тела)
+                for tc in hull:
+                    if np.hypot(tc[0] - fx, tc[1] - fy) < reach:
+                        continue
+                    armp, restp = cut_across_arm(cur, (fx, fy), tuple(tc), cfg)  # перпендикуляр к (подмышка->tc)
+                    if armp is None or not (min_arm <= armp.area <= max_arm):
+                        continue
+                    ok, tip, _w = _arm_has_hand(page, armp, cfg)
+                    if ok and (best is None or armp.area < best[0].area):
+                        best = (armp, restp, tip)
+                if best is not None:
+                    found = (best[0], [best[0], best[1]], (fx, fy), best[2])
             if found:
                 break
         if not found:
