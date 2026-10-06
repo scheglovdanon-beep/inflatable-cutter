@@ -75,12 +75,20 @@ class Figure:
     def out_h_mm(self): return self.out_h_pt * PT2MM
 
 
-def build_contour(drawings, gap_mm: float, target_height_mm: float):
+def build_contour(drawings, gap_mm: float, target_height_mm: float, exclude_outline: bool = False):
     """union заливок -> закрытие щелей buffer(+g).buffer(-g) -> один Polygon без дыр.
     Контур строится «в финальном масштабе»: зазор g пересчитан так, чтобы после
     увеличения фигуры до target_height_mm он равнялся ровно gap_mm (в реальных мм).
+    exclude_outline=True — выкинуть near-black заливки (чёрные обводки составным путём
+    парсятся в сплошной блоб с прямым верхом -> контур спрямляет руку). Точный контур.
     Возвращает (contour, union, n_parts, is_valid)."""
-    polys = [p for p in (_poly_of(d) for d in drawings if d.get("fill") is not None) if p]
+    def _keep(d):
+        if d.get("fill") is None:
+            return False
+        if exclude_outline and sum(int(255 * v) for v in d["fill"]) < 60:
+            return False
+        return True
+    polys = [p for p in (_poly_of(d) for d in drawings if _keep(d)) if p]
     if not polys:
         raise ValueError("нет заливок для контура")
     u = unary_union(polys)
@@ -95,8 +103,8 @@ def build_contour(drawings, gap_mm: float, target_height_mm: float):
     return contour, u, n_parts, bool(contour.is_valid)
 
 
-def build_figure(side, drawings, page_H, target_height_mm, gap_mm) -> Figure:
-    contour, union, n_parts, valid = build_contour(drawings, gap_mm, target_height_mm)
+def build_figure(side, drawings, page_H, target_height_mm, gap_mm, exclude_outline=False) -> Figure:
+    contour, union, n_parts, valid = build_contour(drawings, gap_mm, target_height_mm, exclude_outline)
     outside_pt2 = union.difference(contour).area          # макет вне контура (в pt^2)
     return Figure(side=side, drawings=drawings, contour_pt=contour, page_H=page_H,
                   target_height_mm=target_height_mm, n_parts=n_parts, is_valid=valid,

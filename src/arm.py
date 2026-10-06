@@ -467,40 +467,82 @@ def _arm_has_hand(page, arm_poly, cfg):
     return bool(ok), tuple(tipu), wrist
 
 
+def _skeleton_arm_candidates(body, cfg):
+    """Кандидаты руки по СКЕЛЕТУ силуэта: кисть = конец длинной ветки, подмышка = развилка
+    у тела. Ловит руки, примыкающие к телу гладко (без вогнутости в контуре). [(armpit_xy, tip_xy, len)]."""
+    from skimage.morphology import skeletonize
+    from scipy.ndimage import convolve
+    mask, _, (ox, oy) = _rasterize_body(body, close_px=int(cfg.get("armpit_close_px", 9)))
+    sk = skeletonize(mask > 0)
+    if sk.sum() < 10:
+        return []
+    H, W = sk.shape
+    kern = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]])
+    deg = convolve(sk.astype(np.uint8), kern, mode="constant") * sk
+    skset = set(map(tuple, np.argwhere(sk)))
+    ends = [tuple(p) for p in np.argwhere(deg == 1)]
+    def nbrs(p):
+        y, x = p
+        return [(y + dy, x + dx) for dy in (-1, 0, 1) for dx in (-1, 0, 1)
+                if (dy or dx) and (y + dy, x + dx) in skset]
+    minlen = cfg.get("arm_skel_min_frac", 0.10) * max(W, H)
+    out = []
+    for e in ends:
+        path, prev, cur = [e], None, e
+        for _ in range(W + H):
+            if deg[cur] >= 3 and len(path) > 1:
+                break
+            nx = [n for n in nbrs(cur) if n != prev]
+            if not nx:
+                break
+            prev, cur = cur, nx[0]; path.append(cur)
+        if len(path) < minlen:
+            continue
+        out.append(((cur[1] + ox, cur[0] + oy), (e[1] + ox, e[0] + oy), len(path)))  # (armpit, tip, len)
+    return out
+
+
 def detect_arms_v2(page, body, cfg):
-    """Детект руки v2 (TZ_arm_detect_v2): вертикальный рез у корня руки (подмышка-низ + верх
-    плеча на ~одном x) + ВАЛИДАЦИЯ кистью. Нет кисти в срезе -> не рука. Режем последовательно.
-    Возвращает список {poly_pt, f, tip}."""
-    W = _poly_width(body); A0 = body.area
-    vtol = cfg.get("arm_root_x_tol_frac", 0.14) * W
-    max_arm = cfg.get("arm_max_frac", 0.35) * A0
-    min_arm = cfg.get("armpit_min_arm_frac", 0.02) * A0
-    exp = cfg.get("expected_arms")
-    arms = []
-    cur = body
-    for _ in range(cfg.get("max_arms", 2)):
-        cons = _contour_concavities(cur, cfg)
-        best = None
-        for (fx, fy, fd) in cons:                                     # f = НИЖНЯЯ подмышка (изгиб)
-            for (gx, gy, gd) in cons:                                 # g = ВЕРХ плеча (над f, ~тот же x)
-                if gy >= fy - 1 or abs(gx - fx) > vtol:               # вертикальный корень руки
+    """Детект руки v2 (TZ_arm_detect_v2) по ТОЧНОМУ контуру: подмышка = вогнутость корня руки;
+    рез — ВЕРТИКАЛЬ (90° к холсту) чуть внутрь руки от подмышки (проходит по вырезу под рукой
+    и отделяет руку, не задевая тело); отрезанное ВАЛИДИРУЕТСЯ наличием КИСТИ (нет кисти -> не
+    рука). Возвращает (список {poly_pt, f, tip}, остаточное тело)."""
+    from shapely.geometry import LineString, Point
+    from shapely.ops import split, unary_union
+    max_arm = cfg.get("arm_max_frac", 0.35) * body.area
+    min_arm = cfg.get("armpit_min_arm_frac", 0.015) * body.area
+    offs = cfg.get("arm_vcut_offsets_pt", [6, 10, 16, 22, 30])      # сдвиг вертикали внутрь руки от подмышки
+    exp = cfg.get("expected_arms"); maxn = cfg.get("max_arms", 2)
+    arms, cur = [], body
+    for _ in range(maxn):
+        axx = cur.centroid.x; b = cur.bounds
+        cons = sorted(_contour_concavities(cur, cfg), key=lambda t: -t[2])  # глубочайшие вогнутости — первыми
+        found = None
+        for (fx, fy, fd) in cons:
+            side = 1 if fx >= axx else -1                            # рука отходит от центра тела
+            for off in offs:
+                x = fx + side * off
+                parts = list(getattr(split(cur, LineString([(x, b[1] - 5), (x, b[3] + 5)])), "geoms", [cur]))
+                if len(parts) < 2:
                     continue
-                arm, rest = cut_across_arm(cur, (fx, fy), ((fx + gx) / 2, gy - 50),
-                                           cfg, blade=blade_pair((gx, gy), (fx, fy)))
-                if arm is None:
-                    continue
-                Aa = arm.area
-                if Aa < min_arm or Aa > max_arm:
-                    continue
-                ok, tip, _w = _arm_has_hand(page, arm, cfg)           # ВАЛИДАЦИЯ кистью
-                if not ok:
-                    continue
-                score = fd + gd                                       # глубже вогнутости = надёжнее
-                if best is None or score > best[0]:
-                    best = (score, arm, rest, (fx, fy), tip)
-        if best is None:
+                armside = [p for p in parts if (p.centroid.x - x) * side > 0]  # куски со стороны руки
+                for arm in sorted(armside, key=lambda p: p.area):    # самый компактный -> рука
+                    Aa = arm.area
+                    if Aa < min_arm or Aa > max_arm:
+                        continue
+                    ok, tip, _w = _arm_has_hand(page, arm, cfg)       # ВАЛИДАЦИЯ кистью
+                    if ok:
+                        found = (arm, parts, (fx, fy), tip); break
+                if found:
+                    break
+            if found:
+                break
+        if not found:
             break
-        _s, arm, rest, f, tip = best
+        arm, parts, f, tip = found
+        rest = unary_union([p for p in parts if p is not arm])
+        if rest.geom_type == "MultiPolygon":
+            rest = max(rest.geoms, key=lambda p: p.area)
         arms.append({"poly_pt": arm, "f": f, "tip": tip})
         cur = rest
         if exp is not None and len(arms) >= exp:

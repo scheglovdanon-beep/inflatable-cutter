@@ -137,7 +137,8 @@ def front_target_height_mm(cfg):
 
 def get_front_figure(page, cfg):
     fr, page_H = front_drawings(page, cfg)
-    return build_figure("front", fr, page_H, front_target_height_mm(cfg), cfg["contour_gap_close_mm"])
+    return build_figure("front", fr, page_H, front_target_height_mm(cfg), cfg["contour_gap_close_mm"],
+                        exclude_outline=cfg.get("contour_exclude_outline", False))
 
 
 def back_drawings(page, cfg=None):
@@ -160,7 +161,8 @@ def back_drawings(page, cfg=None):
 
 def get_back_figure(page, cfg):
     br, page_H = back_drawings(page, cfg)
-    return build_figure("back", br, page_H, front_target_height_mm(cfg), cfg["contour_gap_close_mm"])
+    return build_figure("back", br, page_H, front_target_height_mm(cfg), cfg["contour_gap_close_mm"],
+                        exclude_outline=cfg.get("contour_exclude_outline", False))
 
 
 def detect_arm_side(page, cfg):
