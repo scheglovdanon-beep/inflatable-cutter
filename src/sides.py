@@ -231,7 +231,21 @@ def add_back_panel(layout, contour_mm, fig, cfg, page, gap=120.0):
     bfig = get_back_figure(page, cfg)
     if cfg.get("arm_cut") == "armpit":                               # зад тоже обрезаем по контуру БЕЗ руки
         from arm import cut_waving_arms
-        bfig.contour_pt, _ = cut_waving_arms(page, bfig.contour_pt, cfg, strict=False)
+        bcfg = cfg
+        man = cfg.get("manual_arms")
+        if man:                                                      # ручной рез задан в координатах ПЕРЕДА ->
+            fx0, fy0, fx1, fy1 = fig.x0, fig.y0, fig.x1, fig.y1      # зеркалим точки в координаты ЗАДА (зад — зеркало)
+            bx0, by0, bx1, by1 = bfig.x0, bfig.y0, bfig.x1, bfig.y1
+            fw = (fx1 - fx0) or 1.0; fh = (fy1 - fy0) or 1.0; bw = bx1 - bx0; bh = by1 - by0
+            mir = lambda p: [bx1 - (p[0] - fx0) / fw * bw, by0 + (p[1] - fy0) / fh * bh]
+            man2 = []
+            for m in man:
+                nm = {"f": mir(m["f"]), "tip": mir(m["tip"])}
+                if m.get("blade"):
+                    nm["blade"] = [mir(m["blade"][0]), mir(m["blade"][1])]
+                man2.append(nm)
+            bcfg = {**cfg, "manual_arms": man2}
+        bfig.contour_pt, _ = cut_waving_arms(page, bfig.contour_pt, bcfg, strict=False)
     bcm = smooth_front(contour_to_mm(bfig), cfg)                     # контур зада в мм (как у переда)
     gmax = layout["front"].bounds[3]
     for s in layout.get("strips", []):
