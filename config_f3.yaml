@@ -43,6 +43,11 @@ make_back: true
 repack: false
 roll_pack: false
 roll_width_mm: 1440
+print_arrange: true
+assembly_instruction: true
+instruction_width_mm: 300
+instruction_font_mm: 6
+roll_print: true
 bg_page_frac: 0.95
 bg_soft_frac: 0.8
 armpit_min_depth_frac: 0.06
