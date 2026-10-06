@@ -1,6 +1,6 @@
 0.0s open
-47.4s front_drawings 7755
-48.4s boundary pts=246
-48.4s detect arms=1
-  f (274, 245) tip (497, 128) frac 0.051
-48.6s saved out/_wel_v3.png
+46.8s front_drawings 7755
+47.9s boundary pts=246
+47.9s detect arms=1
+  f (274, 245) tip (497, 128) frac 0.041
+48.1s saved out/_wel_v4.png

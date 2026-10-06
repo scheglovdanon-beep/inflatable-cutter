@@ -601,17 +601,26 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
     if cfg.get("arm_cut") != "armpit":
         return contour_pt, []
     body_pt = contour_pt
-    man = cfg.get("manual_arms")                                      # [{f:[x,y], tip:[x,y]}] — ручной рез
-    if man:                                                           # (когда подмышки нет в силуэте: рука примыкает гладко)
+    man = cfg.get("manual_arms")                                      # [{f, tip, blade:[[x,y],[x,y]]}] — ручной рез
+    if man:                                                           # blade = пара углов корня; режем ХОРДОЙ между ними
+        from shapely.geometry import Point as _Pt
+        exc = body_pt.exterior
+        def _snap(p):
+            return np.asarray(exc.interpolate(exc.project(_Pt(*p))).coords[0], float)
         cut = []
         for m in man:
-            f = tuple(m["f"]); tip = tuple(m["tip"])
-            arm_poly, body2 = cut_across_arm(body_pt, f, tip, cfg, blade=m.get("blade"))
+            f = tuple(m["f"]); tip = tuple(m["tip"]); bl = m.get("blade")
+            if bl:                                                    # привязать точки к контуру + продлить -> чистый рез
+                a = _snap(bl[0]); c = _snap(bl[1]); dv = c - a; nn = np.hypot(*dv)
+                if nn > 1:
+                    dv = dv / nn; bl = (tuple(a - dv * 40), tuple(c + dv * 40))
+            arm_poly, body2 = cut_across_arm(body_pt, f, tip, cfg, blade=bl)
             if arm_poly is None:
                 if strict:
                     raise RuntimeError(f"ручной рез руки не удался (f={f}, tip={tip})")
                 continue
             body_pt = body2
+            exc = body_pt.exterior                                    # контур изменился после реза
             cut.append({"poly_pt": arm_poly, "f": f, "tip": tip})
         return body_pt, cut
     if cfg.get("arm_detect_v2"):                                      # v2: вертикальный рез у корня + валидация кистью

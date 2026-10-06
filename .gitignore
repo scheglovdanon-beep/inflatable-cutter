@@ -8,3 +8,5 @@ __pycache__/
 _render_etalon.py
 out/_ps_*
 out/_roll_cfg.yaml
+_dbg_*.py
+_dbg*.log

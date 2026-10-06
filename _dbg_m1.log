@@ -1,6 +1,6 @@
 0.0s open
-4.0s front_drawings 1264
-4.3s boundary pts=246
-4.5s detect arms=1
-  f (219, 287) tip (13, 154) frac 0.064
-4.6s saved out/_m1_v3.png
+4.3s front_drawings 1264
+4.6s boundary pts=246
+4.8s detect arms=1
+  f (219, 287) tip (13, 154) frac 0.066
+5.0s saved out/_m1_v4.png
