@@ -216,24 +216,35 @@ def _design_clipped(dds, tf, f_mm, contour, title):
     return "\n".join(out)
 
 
-def _hand_tex(poly, src, arm_dds, f_mm, cid):
-    """Текстура кисти через аффин src(pt)->poly, ГЕОМЕТРИЧЕСКИ обрезанная по контуру кисти
-    (всё снаружи удалено — надёжнее clipPath, который Corel игнорирует при импорте)."""
+def _hand_tex(page, poly, src, cid, zoom=6.0):
+    """Текстура кисти = РАСТР оригинала (идеальные цвета вкл. градиенты), размещённый аффином
+    src(pt)->poly через SVG matrix (корректно и для зеркальной «правой стороны»), клип по
+    контуру кисти. Вектор-пересборка теряла градиенты (ладонь выходила серой/без контура)."""
+    import base64
     s = np.asarray(src, float); dst = np.array(poly.exterior.coords[:-1])
     if len(s) != len(dst):
         return []
     Mx = np.hstack([s, np.ones((len(s), 1))])
     ax = np.linalg.lstsq(Mx, dst[:, 0], rcond=None)[0]; ay = np.linalg.lstsq(Mx, dst[:, 1], rcond=None)[0]
-    tf = lambda x, y: (float(ax @ [x, y, 1.0]), float(ay @ [x, y, 1.0]))
-    return [_design_clipped(arm_dds, tf, f_mm, poly, "fist")]
+    x0, y0 = float(s[:, 0].min()), float(s[:, 1].min()); x1, y1 = float(s[:, 0].max()), float(s[:, 1].max())
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=pymupdf.Rect(x0, y0, x1, y1), alpha=True)
+    png = base64.b64encode(pix.tobytes("png")).decode()
+    a = ax[0] / zoom; c = ax[1] / zoom; e = ax[0] * x0 + ax[1] * y0 + ax[2]   # пиксель -> src -> аффин(poly)
+    b = ay[0] / zoom; d = ay[1] / zoom; ff = ay[0] * x0 + ay[1] * y0 + ay[2]
+    cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in poly.exterior.coords)
+    return [f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'      # клип на ГРУППЕ (мм-простр.),
+            f'<g clip-path="url(#{cid})">'                                       # трансформ image — ВНУТРИ
+            f'<image width="{pix.width}" height="{pix.height}" '
+            f'transform="matrix({a:.5f},{b:.5f},{c:.5f},{d:.5f},{e:.3f},{ff:.3f})" '
+            f'preserveAspectRatio="none" xlink:href="data:image/png;base64,{png}"/></g>']
 
 
-def _piece_svg(p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill="#f5f5f5"):
+def _piece_svg(page, p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill="#f5f5f5"):
     """SVG-элементы одной детали руки/кисти: текстура/контур + припуск."""
     poly = p["poly"]; body = []
     if kind == "hand":
         if p.get("src") is not None:
-            body += _hand_tex(poly, p["src"], arm_dds, f_mm, cid)
+            body += _hand_tex(page, poly, p["src"], cid)
         else:                                                        # полоска-боковина = цвет кисти
             body.append(_poly(list(poly.exterior.coords), fill=hand_fill, stroke="none", sw=0))
         body.append(_poly(list(poly.exterior.coords), stroke="#009659", sw=lw))
@@ -568,16 +579,16 @@ def main():
     # КИСТЬ и РУКА — каждая деталь своей группой (текстура по bbox src этого куска)
     for hp in lay.get("hand_pieces", []):
         dds = _dds_for_src(hp["src"]) if hp.get("src") is not None else arm_dds
-        pieces.append((f"kist_{hp['name']}", _piece_svg(hp, "hand", dds, f_mm, lw, nextid(), hand_fill=hand_fill)))
+        pieces.append((f"kist_{hp['name']}", _piece_svg(page, hp, "hand", dds, f_mm, lw, nextid(), hand_fill=hand_fill)))
     for apc in lay.get("arm_pieces", []):
-        pieces.append((f"ruka_{apc.get('name','?')}", _piece_svg(apc, "arm", arm_dds, f_mm, lw, nextid(), arm_fill)))
+        pieces.append((f"ruka_{apc.get('name','?')}", _piece_svg(page, apc, "arm", arm_dds, f_mm, lw, nextid(), arm_fill)))
 
     # ЗАПАСНАЯ РУКА — ВСЕ детали одной группой
     spare = lay.get("spare_arm", [])
     if spare:
         body = []
         for p in spare:
-            body += _piece_svg(p, p["kind"], arm_dds, f_mm, lw, nextid(), arm_fill, hand_fill)
+            body += _piece_svg(page, p, p["kind"], arm_dds, f_mm, lw, nextid(), arm_fill, hand_fill)
         pieces.append(("zapasnaya_ruka", body))
 
     # ДНИЩЕ (+ отверстие) и НОЖКА
