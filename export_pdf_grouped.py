@@ -95,40 +95,54 @@ def _stroke_paths(geom, stroke, sw):
     return out
 
 
-def _pix_png_nobg(pix, tol=48):
-    """PNG из пиксмапа с УДАЛЁННЫМ фоном макета (серый беграунд): пиксели цвета углов,
-    СВЯЗАННЫЕ с краем растра, -> прозрачные. Остаётся только фигура (цвета внутри сохраняются)."""
-    import numpy as np, cv2, io
+_BG_COLS = []                                                         # цвета фоновых прямоугольников макета (заполняется в main)
+
+
+def _bg_fill_colors(page, cfg):
+    """Цвета фоновых прямоугольников макета = БОЛЬШИЕ заливки во всю страницу (нижний слой, на
+    котором лежат перёд и зад). Берём fill прямо из вектора (надёжнее угадывания по рамке);
+    критерий «большой» — тот же, что в _drop_background."""
+    R = page.rect; pf = (cfg or {}).get("bg_page_frac", 0.95); sf = (cfg or {}).get("bg_soft_frac", 0.80)
+    pa = R.width * R.height; cols = []
+    for x in page.get_drawings():
+        f = x.get("fill")
+        if f is None:
+            continue
+        rc = x["rect"]
+        big = ((rc.width > pf * R.width and rc.height > pf * R.height) or
+               ((rc.width * rc.height) > sf * pa and rc.width > 0.6 * R.width))
+        if big:
+            cols.append(tuple(int(round(min(1.0, max(0.0, v)) * 255)) for v in f[:3]))
+    return cols
+
+
+def _pix_png_nobg(pix, bg_cols, tol=40):
+    """Убрать фон макета из растра: прозрачим пиксели цвета(ов) фонового прямоугольника bg_cols
+    (из вектора, _bg_fill_colors). Фигура нарисована ПОВЕРХ фона, поэтому её пиксели — её цвета,
+    а не цвет фона: удаление ровно по цвету фона безопасно (near-белый фон = бумага не трогаем)."""
+    import numpy as np, io
     from PIL import Image
     a = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)
     img = a.copy() if pix.n == 4 else np.dstack([a, np.full(a.shape[:2], 255, np.uint8)])
-    H, W = img.shape[:2]; rgb = img[:, :, :3].astype(int)
-    tw = max(2, int(H * 0.03)); sw = max(2, int(W * 0.03))            # фон = МОДА рамки (краёв), не углов
-    frame = np.concatenate([rgb[:tw].reshape(-1, 3), rgb[-tw:].reshape(-1, 3),
-                            rgb[:, :sw].reshape(-1, 3), rgb[:, -sw:].reshape(-1, 3)])
-    q = (frame // 8) * 8; cols, cnts = np.unique(q, axis=0, return_counts=True)
-    bg = cols[int(np.argmax(cnts))]                                  # доминирующий цвет рамки = фон
-    if bg.sum() >= 720:                                               # фон near-белый (= бумага) -> НЕ удалять
-        buf = io.BytesIO(); Image.fromarray(img, "RGBA").save(buf, "PNG"); return buf.getvalue()  # иначе съест белое/чёрное фигуры
-    bgmask = (np.abs(rgb - bg).sum(2) < tol).astype(np.uint8)
-    if bgmask.any():
-        n, lbl = cv2.connectedComponents(bgmask, connectivity=4)      # только фон, связанный с КРАЕМ
-        border = set(lbl[0, :]).union(lbl[H - 1, :], lbl[:, 0], lbl[:, W - 1]); border.discard(0)
-        if border:
-            img[np.isin(lbl, list(border)), 3] = 0
+    rgb = img[:, :, :3].astype(int)
+    for c in bg_cols or []:
+        c = np.array(c[:3], int)
+        if c.sum() >= 720:                                           # near-белый фон = бумага, не трогаем
+            continue
+        img[np.abs(rgb - c).sum(2) < tol, 3] = 0                     # прозрачим фон по цвету
     buf = io.BytesIO(); Image.fromarray(img, "RGBA").save(buf, "PNG")
     return buf.getvalue()
 
 
-def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0, strip_bg=False):
+def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0):
     """Текстура = РАСТР оригинального рендера макета КАК ЕСТЬ (идеальные цвета, градиенты,
     чёрная обводка/плашки — всё точно из макета), обрезанный по контуру детали через clipPath.
-    strip_bg=True — доп. убрать цветной фон макета (только где он реально есть; по умолчанию НЕ
-    трогаем, иначе съедает чёрную обводку/светлые части фигуры)."""
+    Фон макета убирается универсально (_pix_png_nobg): цветной/серый фон -> прозрачный,
+    near-белый (бумага) и чёрная обводка фигуры сохраняются."""
     import base64
     clip = pymupdf.Rect(*src_bbox_pt)
     pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=True)
-    png = base64.b64encode(_pix_png_nobg(pix) if strip_bg else pix.tobytes("png")).decode()
+    png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS)).decode()     # убрать фон макета (по цвету из вектора)
     x0, y0 = tf(clip.x0, clip.y0); x1, y1 = tf(clip.x1, clip.y1)       # угол панели (аффин без поворота)
     cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in contour.exterior.coords)
     return (f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'
@@ -242,7 +256,7 @@ def _design_clipped(dds, tf, f_mm, contour, title):
     return "\n".join(out)
 
 
-def _hand_tex(page, poly, src, cid, zoom=6.0, strip_bg=False):
+def _hand_tex(page, poly, src, cid, zoom=6.0):
     """Текстура кисти = РАСТР оригинала (идеальные цвета вкл. градиенты), размещённый аффином
     src(pt)->poly через SVG matrix (корректно и для зеркальной «правой стороны»), клип по
     контуру кисти. Вектор-пересборка теряла градиенты (ладонь выходила серой/без контура)."""
@@ -254,7 +268,7 @@ def _hand_tex(page, poly, src, cid, zoom=6.0, strip_bg=False):
     ax = np.linalg.lstsq(Mx, dst[:, 0], rcond=None)[0]; ay = np.linalg.lstsq(Mx, dst[:, 1], rcond=None)[0]
     x0, y0 = float(s[:, 0].min()), float(s[:, 1].min()); x1, y1 = float(s[:, 0].max()), float(s[:, 1].max())
     pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=pymupdf.Rect(x0, y0, x1, y1), alpha=True)
-    png = base64.b64encode(_pix_png_nobg(pix) if strip_bg else pix.tobytes("png")).decode()
+    png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS)).decode()
     a = ax[0] / zoom; c = ax[1] / zoom; e = ax[0] * x0 + ax[1] * y0 + ax[2]   # пиксель -> src -> аффин(poly)
     b = ay[0] / zoom; d = ay[1] / zoom; ff = ay[0] * x0 + ay[1] * y0 + ay[2]
     cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in poly.exterior.coords)
@@ -451,6 +465,8 @@ def main():
     cfg = yaml.safe_load(open(args.config, encoding="utf-8"))
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     page = pymupdf.open(args.input_pdf)[0]
+    global _BG_COLS
+    _BG_COLS = _bg_fill_colors(page, cfg)                             # цвета фона из вектора (нижний слой-прямоугольник)
 
     lay, fig, contour_mm, g, arm_pts, seam_mm = build_layout(page, cfg)
     lw = cfg.get("line_width_mm", 0.2); f_mm = fig.s * PT2MM
@@ -547,7 +563,7 @@ def main():
 
     # ПЕРЁД (текстура ОБРЕЗАНА по контуру + контур + припуск + цветной ключ-полоса — одна группа)
     fr_bbox = fig.contour_pt.bounds                                   # bbox КОНТУРА (покрывает всю панель, без зазоров)
-    pieces.append(("front", [_design_raster(page, fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm), lay["front"], nextid(), strip_bg=cfg.get("strip_bg", False)),
+    pieces.append(("front", [_design_raster(page, fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm), lay["front"], nextid()),
                              _poly(list(lay["front"].exterior.coords), stroke="#000", sw=lw),
                              _poly(list(lay["front_seam"].exterior.coords), stroke="#dc0000", sw=lw),
                              _arc_paths(front_arcs, lay["front"], "seam_front")]))
@@ -558,7 +574,7 @@ def main():
         from sides import back_drawings
         bk_bbox = bk["cut_pt"].bounds if bk.get("cut_pt") else bk["src"].bounds   # bbox КОНТУРА зада
         # from_front: зад — копия переда, текстуру берём с ПЕРЕДА (симметричная фигура)
-        bbody = [_design_raster(page, bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["poly"], nextid(), strip_bg=cfg.get("strip_bg", False)),
+        bbody = [_design_raster(page, bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["poly"], nextid()),
                  _poly(list(bk["poly"].exterior.coords), stroke="#000", sw=lw)]
         if bk.get("seam"):
             bbody.append(_poly(list(bk["seam"].exterior.coords), stroke="#dc0000", sw=lw))
