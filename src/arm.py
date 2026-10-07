@@ -1540,6 +1540,9 @@ def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg, armpit=None):
         return None, None, None
     u = u / L
     esc = _elbow_color_s(page, arm_poly, wmid, u, L, cfg)            # 1) цветовой переход рукав<->кожа (манжет)
+    emax = cfg.get("elbow_max_frac")                                 # цветовой переход у ПЛЕЧА (пад/корпус), не локоть:
+    if esc is not None and emax is not None and esc > emax * L:      # слишком близко к подмышке -> это не локоть,
+        esc = None                                                  # берём локоть по ИЗГИБУ (согнутая рука)
     if esc is not None:
         elbow_s, elbow_p = esc, (wmid + u * esc)
     else:
