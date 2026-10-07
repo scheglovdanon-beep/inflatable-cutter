@@ -95,12 +95,52 @@ def _stroke_paths(geom, stroke, sw):
     return out
 
 
+def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0):
+    """Текстура = РАСТР оригинального рендера макета (идеальные цвета, включая ГРАДИЕНТЫ,
+    которые get_drawings не воспроизводит), обрезанный по контуру детали через clipPath.
+    src_bbox_pt — bbox исходных заливок детали (pt); tf — аффин pt-макета -> мм-панели."""
+    import base64
+    clip = pymupdf.Rect(*src_bbox_pt)
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=True)
+    png = base64.b64encode(pix.tobytes("png")).decode()
+    x0, y0 = tf(clip.x0, clip.y0); x1, y1 = tf(clip.x1, clip.y1)       # угол панели (аффин без поворота)
+    cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in contour.exterior.coords)
+    return (f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'
+            f'<image clip-path="url(#{cid})" x="{min(x0, x1):.2f}" y="{min(y0, y1):.2f}" '
+            f'width="{abs(x1 - x0):.2f}" height="{abs(y1 - y0):.2f}" preserveAspectRatio="none" '
+            f'xlink:href="data:image/png;base64,{png}"/>')
+
+
+def _design_native(dds, tf, f_mm, contour, cid):
+    """Оригинальный арт КАК ЕСТЬ (точные цвета и правило заливки) + клип по контуру через
+    clipPath. Без геометрической пересборки заливок -> идеальная текстура (красное тело розы
+    и т.п. не теряются). Для переда/зада — там важна точность исходных цветов."""
+    from export_svg import _path_d
+    cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in contour.exterior.coords)
+    out = [f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>',
+           f'<g clip-path="url(#{cid})">']
+    for dd in dds:
+        d = _path_d(dd, tf)
+        if not d:
+            continue
+        fl = HEX(tuple(int(255 * v) for v in dd["fill"])) if dd.get("fill") else "none"
+        fr = "evenodd" if dd.get("even_odd") else "nonzero"            # правило заливки КАК В МАКЕТЕ
+        if dd.get("color"):
+            st = HEX(tuple(int(255 * v) for v in dd["color"])); sw = max(dd.get("width", 0.3) * f_mm, 0.05)
+            out.append(f'<path d="{d}" fill="{fl}" fill-rule="{fr}" stroke="{st}" stroke-width="{sw:.3f}"/>')
+        else:
+            out.append(f'<path d="{d}" fill="{fl}" fill-rule="{fr}"/>')
+    out.append("</g>")
+    return "\n".join(out)
+
+
 def _design_clipped(dds, tf, f_mm, contour, title):
     """Текстура макета, ГЕОМЕТРИЧЕСКИ ОБРЕЗАННАЯ по контуру детали (всё снаружи удалено).
     Заливки: even-odd регион = XOR подпутей, пересечённый с контуром. Обводки: клип ломаных.
     Надёжнее clipPath (Corel игнорирует clip при импорте -> текстура вылезала за контур)."""
     from shapely.geometry import Polygon, LineString, box as _box
     from shapely.prepared import prep
+    from shapely.ops import unary_union
     from export_svg import _path_d
     cp = contour.buffer(0)
     pp = prep(cp)
@@ -117,26 +157,48 @@ def _design_clipped(dds, tf, f_mm, contour, title):
                 d = _path_d(dd, tf)
                 if d:
                     fl = HEX(tuple(int(255 * v) for v in dd["fill"])) if dd.get("fill") else "none"
-                    if dd.get("color"):
+                    fr = "evenodd" if dd.get("even_odd") else "nonzero"   # правило заливки КАК В МАКЕТЕ (иначе
+                    if dd.get("color"):                                   # nonzero-заливка с перекрытием подпутей белеет)
                         st = HEX(tuple(int(255 * v) for v in dd["color"])); sw = max(dd.get("width", 0.3) * f_mm, 0.05)
-                        out.append(f'<path d="{d}" fill="{fl}" fill-rule="evenodd" stroke="{st}" stroke-width="{sw:.3f}"/>')
+                        out.append(f'<path d="{d}" fill="{fl}" fill-rule="{fr}" stroke="{st}" stroke-width="{sw:.3f}"/>')
                     else:
-                        out.append(f'<path d="{d}" fill="{fl}" fill-rule="evenodd"/>')
+                        out.append(f'<path d="{d}" fill="{fl}" fill-rule="{fr}"/>')
                 continue
         subs = _subpaths(dd, tf)                                      # пограничный -> геометрическая обрезка
         if not subs:
             continue
         if dd.get("fill"):
             region = None
-            for s in subs:
-                if len(s) >= 3:
+            if dd.get("even_odd"):                                    # even-odd: XOR подпутей
+                for s in subs:
+                    if len(s) >= 3:
+                        try:
+                            poly = Polygon(s).buffer(0)
+                        except Exception:
+                            continue
+                        if not poly.is_empty:
+                            region = poly if region is None else region.symmetric_difference(poly)
+            else:                                                    # nonzero: внешние подпути (+) добавляют, внутренние
+                pos, neg = [], []                                    # (−, противоположный обход = дырки) вычитаются
+                for s in subs:
+                    if len(s) < 3:
+                        continue
+                    a = 0.0                                          # знаковая площадь (ориентация обхода)
+                    for i in range(len(s)):
+                        x0, y0 = s[i]; x1, y1 = s[(i + 1) % len(s)]
+                        a += x0 * y1 - x1 * y0
                     try:
                         poly = Polygon(s).buffer(0)
                     except Exception:
                         continue
-                    if poly.is_empty:
-                        continue
-                    region = poly if region is None else region.symmetric_difference(poly)
+                    if not poly.is_empty:
+                        (pos if a >= 0 else neg).append(poly)
+                if pos:
+                    region = unary_union(pos)
+                    if neg:
+                        region = region.difference(unary_union(neg))
+                elif neg:                                            # все подпути одного (обратного) знака -> их объединение
+                    region = unary_union(neg)
             if region is not None and not region.is_empty:
                 clipped = region.intersection(cp)
                 if not clipped.is_empty:
@@ -440,7 +502,9 @@ def main():
 
     # ПЕРЁД (текстура ОБРЕЗАНА по контуру + контур + припуск + цветной ключ-полоса — одна группа)
     fr_in = _near_fills(front_drawings(page, cfg)[0], fig.contour_pt)
-    pieces.append(("front", [_design_clipped(fr_in, _tex_tf(contour_mm, lay["front"], f_mm), f_mm, lay["front"], "front_tex"),
+    _frs = [d["rect"] for d in fr_in]
+    fr_bbox = (min(r.x0 for r in _frs), min(r.y0 for r in _frs), max(r.x1 for r in _frs), max(r.y1 for r in _frs))
+    pieces.append(("front", [_design_raster(page, fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm), lay["front"], nextid()),
                              _poly(list(lay["front"].exterior.coords), stroke="#000", sw=lw),
                              _poly(list(lay["front_seam"].exterior.coords), stroke="#dc0000", sw=lw),
                              _arc_paths(front_arcs, lay["front"], "seam_front")]))
@@ -450,7 +514,9 @@ def main():
     if bk:
         from sides import back_drawings
         bk_in = _near_fills(back_drawings(page, cfg)[0], bk["cut_pt"]) if bk.get("cut_pt") else back_drawings(page, cfg)[0]
-        bbody = [_design_clipped(bk_in, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["f_mm"], bk["poly"], "back_tex"),
+        _brs = [d["rect"] for d in bk_in]
+        bk_bbox = (min(r.x0 for r in _brs), min(r.y0 for r in _brs), max(r.x1 for r in _brs), max(r.y1 for r in _brs))
+        bbody = [_design_raster(page, bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["poly"], nextid()),
                  _poly(list(bk["poly"].exterior.coords), stroke="#000", sw=lw)]
         if bk.get("seam"):
             bbody.append(_poly(list(bk["seam"].exterior.coords), stroke="#dc0000", sw=lw))
@@ -564,8 +630,8 @@ def main():
         W = inst_bbox[2] + igap; H = max(H, inst_bbox[3] + igap)
 
     # сборка: каждая запись pieces -> отдельный Form XObject (= группа в Corel)
-    hdr = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.2f}mm" height="{H:.2f}mm" '
-           f'viewBox="0 0 {W:.2f} {H:.2f}">')
+    hdr = (f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+           f'width="{W:.2f}mm" height="{H:.2f}mm" viewBox="0 0 {W:.2f} {H:.2f}">')
 
     if args.out.lower().endswith(".svg"):                             # SVG: каждая деталь = <g id=..> (НАСТОЯЩАЯ
         def _gid(n):                                                  # группа; Corel сохраняет при переводе в кривые)
