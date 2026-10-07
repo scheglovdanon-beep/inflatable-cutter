@@ -117,19 +117,25 @@ def _bg_fill_colors(page, cfg):
 
 
 def _pix_png_nobg(pix, bg_cols, tol=40):
-    """Убрать фон макета из растра: прозрачим пиксели цвета(ов) фонового прямоугольника bg_cols
-    (из вектора, _bg_fill_colors). Фигура нарисована ПОВЕРХ фона, поэтому её пиксели — её цвета,
-    а не цвет фона: удаление ровно по цвету фона безопасно (near-белый фон = бумага не трогаем)."""
-    import numpy as np, io
+    """Убрать фон макета из растра. Цвет фона берём из вектора (bg_cols = _bg_fill_colors —
+    большой прямоугольник нижнего слоя), но прозрачим ТОЛЬКО область этого цвета, СВЯЗАННУЮ С
+    КРАЕМ растра (фон окружает фигуру снаружи). Карман того же цвета ВНУТРИ контура (напр. серые
+    штаны охотников) с краем не связан -> остаётся. near-белый фон (бумага) не трогаем."""
+    import numpy as np, cv2, io
     from PIL import Image
     a = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)
     img = a.copy() if pix.n == 4 else np.dstack([a, np.full(a.shape[:2], 255, np.uint8)])
-    rgb = img[:, :, :3].astype(int)
+    H, W = img.shape[:2]; rgb = img[:, :, :3].astype(int)
     for c in bg_cols or []:
         c = np.array(c[:3], int)
         if c.sum() >= 720:                                           # near-белый фон = бумага, не трогаем
             continue
-        img[np.abs(rgb - c).sum(2) < tol, 3] = 0                     # прозрачим фон по цвету
+        m = (np.abs(rgb - c).sum(2) < tol).astype(np.uint8)          # маска пикселей цвета фона
+        n, lbl = cv2.connectedComponents(m, connectivity=4)
+        border = set(lbl[0, :]).union(lbl[H - 1, :], lbl[:, 0], lbl[:, W - 1]); border.discard(0)
+        if not border:
+            continue
+        img[np.isin(lbl, list(border)), 3] = 0                       # прозрачим только фон у края (не внутр. карманы)
     buf = io.BytesIO(); Image.fromarray(img, "RGBA").save(buf, "PNG")
     return buf.getvalue()
 
