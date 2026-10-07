@@ -608,12 +608,25 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
         def _snap(p):
             return np.asarray(exc.interpolate(exc.project(_Pt(*p))).coords[0], float)
         cut = []
+        from shapely.geometry import LineString as _LS
         for m in man:
             f = tuple(m["f"]); tip = tuple(m["tip"]); bl = m.get("blade")
-            if bl:                                                    # привязать точки к контуру + продлить -> чистый рез
+            if bl:                                                    # 2 ТОЧКИ: хорда — привязать к контуру + продлить
                 a = _snap(bl[0]); c = _snap(bl[1]); dv = c - a; nn = np.hypot(*dv)
                 if nn > 1:
                     dv = dv / nn; bl = (tuple(a - dv * 40), tuple(c + dv * 40))
+            else:                                                    # 1 ТОЧКА: ВЕРТИКАЛЬНЫЙ рез (90° к холсту) от f
+                fs = _snap(f); fx = float(fs[0])                     # вверх до следующей точки контура
+                yb = body_pt.bounds
+                inter = exc.intersection(_LS([(fx, yb[1] - 5), (fx, yb[3] + 5)]))
+                pts = []
+                if not inter.is_empty:
+                    for g in getattr(inter, "geoms", [inter]):
+                        pts += [tuple(c) for c in np.atleast_2d(np.asarray(g.coords))]
+                ups = [p for p in pts if p[1] < fs[1] - 1]           # выше f (y вниз -> меньше y = выше)
+                if ups:
+                    up = min(ups, key=lambda p: fs[1] - p[1])        # ближайшая точка контура вверх
+                    bl = ((fx, float(fs[1]) + 40), (fx, float(up[1]) - 40))  # вертикальная хорда, продлённая
             arm_poly, body2 = cut_across_arm(body_pt, f, tip, cfg, blade=bl)
             if arm_poly is None:
                 if strict:
