@@ -1211,6 +1211,11 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None):
     arm_poly = arm_pt if hasattr(arm_pt, "exterior") else Polygon(arm_pt)
     arm_arr = np.asarray(arm_poly.exterior.coords[:-1], float)       # PT, замкнут -> без дубля
 
+    if armpit is not None:                                           # tip = самый ДАЛЬНИЙ угол руки от подмышки:
+        _fa = np.asarray(armpit, float)                             # для СОГНУТОЙ руки (кулак вверх) ось кисть->подмышка
+        _d = np.hypot(arm_arr[:, 0] - _fa[0], arm_arr[:, 1] - _fa[1])  # верна; иначе прямая tip->подмышка идёт через
+        tip = tuple(arm_arr[int(np.argmax(_d))])                    # изгиб и запястье уезжает к манжету (кисть=вся рука)
+
     # 1) запястье + рез на (кисть, предплечье) — ТОЛЬКО для получения формы кисти
     wrist, tip_used, wmethod = _wrist_on_poly(page, arm_arr, tip, cfg, armpit=armpit)
     hand_pts, fore_pts = cut_arm(arm_arr, wrist, tip_used)
