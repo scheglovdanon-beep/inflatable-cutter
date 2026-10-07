@@ -1,0 +1,93 @@
+target_height_mm: 1700
+front_smooth_mm: 140
+expected_arms: 2
+seam_allowance_mm: 10
+line_width_mm: 0.2
+thickness_mm: 300
+notch_interval_mm: 200
+mirror_back: false
+contour_gap_close_mm: 10.0
+front_all_details: true
+fan_diameter_mm: 460
+main_width_mm: 350
+edge_taper_single: true
+transition_piece_len_mm: 500
+protrusion_narrow: true
+protrusion_open_r_mm: 60
+protrusion_reach_ratio: 0.6
+protrusion_min_area_mm2: 150
+tip_width_mm: 250
+protrusion_min_piece_mm: 500
+neck_search_top_frac: 0.5
+neck_smooth_mm: 40
+neck_min_drop: 0.12
+arm_side: auto
+arm_hole_diameter_mm: 154
+arm_hole_at_armpit: true
+arm_hole_no_seam: true
+arm_hole_top_margin_mm: 20
+base_diameter_mm: 460
+leg_height_mm: 150
+side_max_len_mm: 1500
+side_min_len_mm: 200
+corner_angle_deg: 35
+corner_simplify_mm: 4.0
+bottom_detect_frac: 0.03
+figure_side: left
+smooth_tol_mm: 1.0
+arm_cut: armpit
+make_appendages: false
+make_hand: false
+make_spare_arm: true
+arm_from_contour: false
+make_base: true
+base_v2: true
+base_center_circle_mm: 300
+gusset_width_mm: 220
+transition_height_mm: 150
+make_back: true
+back_from_front: true   # симметричная роза: зад = копия переда (та же форма+текстура, без зазоров)
+arms_identical: true    # роза: руки одинаковы -> одно лекало + копия (запаска)
+repack: false
+roll_pack: false
+roll_width_mm: 1440
+bg_page_frac: 0.95
+bg_soft_frac: 0.8
+armpit_min_depth_frac: 0.03
+armpit_min_arm_frac: 0.015
+arm_max_frac: 0.5
+arm_min_aspect: 1.4
+blade_min_frac: 0.08
+max_arms: 2
+armpit_center_frac: 0.05
+armpit_tip_free_frac: 0.2
+armpit_up_slack_frac: 0.0
+armpit_close_px: 9
+armpit_pair_local_frac: 0.9
+armpit_refine_aspect_relax: 0.7
+arm_template: true
+arrange_sides: false
+print_arrange: true
+assembly_instruction: true
+instruction_width_mm: 300
+instruction_font_mm: 6
+roll_print: true
+roll_width_mm: 1440
+
+contour_exclude_outline: false   # у космонавта голова = большой чёрный визор; exclude_outline его бы выкинул. Рука режется вручную по хорде, спрямление не важно
+elbow_max_frac: 0.72             # согнутая рука: цветовой локоть у плеч.пада уходил к корпусу -> берём локоть по изгибу
+arm_zone_color_raster: true      # цвет зон плечо/предплечье по реальным пикселям, а не по bbox заливок (тень с большим bbox ложно выигрывала)
+arm_white_snap: 235              # при раскраске руки near-белый (все каналы >=235) -> чистый белый (255,255,255)
+union_batch_size: 300
+raster_zoom: 1.5
+arm_raster_z: 3.0
+# ручной рез: 2 руки Secret Garden — левая (хорда 5-3), правая (хорда 4-2)
+manual_arms:
+  - blade: [[198, 290], [196, 337]]    # ЛЕВАЯ: корень 5 и 3
+    f: [196, 337]
+    tip: [84, 243]                     # кисть 0
+    wrist: [[86, 289], [107, 267]]     # кисть: точки 4 и 10
+    elbow: [[137, 330], [139, 292]]    # локоть: точки 13 и 17
+  - blade: [[474, 290], [477, 337]]    # ПРАВАЯ: корень 4 и 2 (только рез из фигуры + отверстие;
+    f: [477, 337]                      # лекала копируются с левой руки — руки одинаковые)
+    tip: [593, 243]                    # кисть 1
