@@ -55,7 +55,12 @@ def build_base_v2(g, cfg):
     fan = cfg["fan_diameter_mm"]                                         # 460 (под вентилятор + ножку)
     th = cfg.get("transition_height_mm", 150)                           # наклонная высота перехода
     nparts = cfg.get("transition_parts", 4)
-    trans = [_develop_frustum(math.pi * circ / nparts, math.pi * fan / nparts, th) for _ in range(nparts)]
+    from shapely import affinity as _aff
+    trans = []
+    for _ in range(nparts):                                          # перевернуть: широкий край (460) смотрит ВВЕРХ
+        t = _develop_frustum(math.pi * circ / nparts, math.pi * fan / nparts, th)
+        t = _aff.scale(t, 1.0, -1.0, origin="center")
+        trans.append(_aff.translate(t, -t.bounds[0], -t.bounds[1]))
     return {
         "dnishe": dnishe, "fan_c": c, "fan_d": circ,                     # fan_d здесь = центральный круг 300
         "bottom_len": L, "width": end_w, "transition": trans,

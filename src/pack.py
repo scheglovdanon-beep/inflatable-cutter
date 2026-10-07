@@ -68,10 +68,10 @@ def _movables(layout):
             if b.get("leg_seam") is not None:
                 b["leg_seam"] = affinity.translate(b["leg_seam"], dx, dy)
         add("leg", b.get("leg_seam") or box(lx, ly, lx + lw, ly + lh), mvleg)
-        for i, tp in enumerate(b.get("transition", [])):               # переход-воронка (части)
+        for i, tp in enumerate(b.get("transition", [])):               # переход-воронка (части) — свой ряд
             def mvt(dx, dy, i=i):
                 b["transition"][i] = affinity.translate(b["transition"][i], dx, dy)
-            add("base", b["transition"][i], mvt)
+            add("transition", b["transition"][i], mvt)
     return items
 
 
@@ -182,7 +182,17 @@ def arrange_print(layout, gap=120.0):
         if grp:
             bottom = max(bottom, y - gap)
 
-    layout["sheet_w"] = x + gap
+    tr = cats.get("transition", [])                                   # ПЕРЕХОД — отдельным РЯДОМ (по центру под низом)
+    if tr:
+        y = bottom + gap
+        row_w = sum(it["w"] for it in tr) + gap * (len(tr) - 1)
+        xx = front_cx - row_w / 2.0
+        for it in tr:
+            it["mv"](xx - it["x"], y - it["y"])
+            xx += it["w"] + gap
+        bottom = max(bottom, y + max(it["h"] for it in tr))
+
+    layout["sheet_w"] = max(x + gap, (front_cx + (sum(it["w"] for it in tr) + gap * (len(tr) - 1)) / 2.0 + gap) if tr else 0)
     layout["sheet_h"] = bottom + gap
 
 
