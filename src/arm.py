@@ -1536,7 +1536,9 @@ def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg, armpit=None, elbo
     возвращает (elbow_chord, fore_color, sh_color). Цвета берутся из 2D по зонам.
     armpit — истинная подмышка из реза (a["f"]): задаёт КОНЕЦ оси руки, чтобы зона плеча не
     уходила в корпус (у «мужика с табличкой» полигон руки прихватывает туловище с логотипом)."""
-    from side_color import arm_zone_color
+    from side_color import arm_zone_color, arm_zone_color_raster
+    _zcol = ((lambda *A: arm_zone_color_raster(*A, cfg)) if cfg.get("arm_zone_color_raster")  # по пикселям vs bbox
+             else arm_zone_color)
     wmid = (np.asarray(wrist[0], float) + np.asarray(wrist[1], float)) / 2.0
     tip = np.asarray(tip, float)
     if armpit is not None:                                           # конец оси = настоящая подмышка
@@ -1554,8 +1556,8 @@ def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg, armpit=None, elbo
         eb = np.asarray(exc.interpolate(exc.project(_Pt(*elbow[1]))).coords[0], float)
         emid = (ea + eb) / 2.0
         elbow_s = float((emid - wmid) @ u); elbow_p = emid
-        fore = arm_zone_color(page, arm_poly, wmid, u, 0.0, elbow_s)
-        sh = arm_zone_color(page, arm_poly, wmid, u, elbow_s, L)
+        fore = _zcol(page, arm_poly, wmid, u, 0.0, elbow_s)
+        sh = _zcol(page, arm_poly, wmid, u, elbow_s, L)
         return (tuple(ea), tuple(eb)), fore, sh
     esc = _elbow_color_s(page, arm_poly, wmid, u, L, cfg)            # 1) цветовой переход рукав<->кожа (манжет)
     emax = cfg.get("elbow_max_frac")                                 # цветовой переход у ПЛЕЧА (пад/корпус), не локоть:
@@ -1565,8 +1567,8 @@ def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg, armpit=None, elbo
         elbow_s, elbow_p = esc, (wmid + u * esc)
     else:
         elbow_s, elbow_p = _elbow_axial(arm_poly, arm_arr, wmid, u, L, cfg)  # 2) вогнутость/изгиб скелета
-    fore = arm_zone_color(page, arm_poly, wmid, u, 0.0, elbow_s)
-    sh = arm_zone_color(page, arm_poly, wmid, u, elbow_s, L)         # до подмышки, не в корпус
+    fore = _zcol(page, arm_poly, wmid, u, 0.0, elbow_s)
+    sh = _zcol(page, arm_poly, wmid, u, elbow_s, L)                 # до подмышки, не в корпус
     if esc is not None:                                             # цвет рукава берём ПРЯМО с перехода (манжет),
         cfore, csh = _elbow_edge_colors(page, arm_poly, wmid, u, L, esc, cfg)  # не из широкой зоны у корпуса
         if csh is not None:

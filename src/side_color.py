@@ -242,6 +242,37 @@ def arm_zone_color(page, arm_poly, origin, u, s0, s1):
     return max(areas, key=areas.get) if areas else None
 
 
+def arm_zone_color_raster(page, arm_poly, origin, u, s0, s1, cfg):
+    """Доминирующий цвет зоны по РЕАЛЬНЫМ ПИКСЕЛЯМ (не по bbox заливок — тонкая тень с большим
+    bbox ложно «выигрывала»). Растрим область руки, маска = внутри arm_poly ∧ осевая s∈[s0,s1),
+    исключаем near-чёрный контур и фон страницы; берём самый частый цвет (квант. до /8)."""
+    import numpy as np, cv2, pymupdf
+    o = np.asarray(origin, float); uu = np.asarray(u, float)
+    b = arm_poly.bounds; Z = float(cfg.get("arm_raster_z", 5.0))
+    clip = pymupdf.Rect(b[0]-2, b[1]-2, b[2]+2, b[3]+2)
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(Z, Z), clip=clip)
+    img = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)[:, :, :3]
+    H, W = img.shape[:2]; ox, oy = clip.x0, clip.y0
+    arm = np.asarray(arm_poly.exterior.coords[:-1], float)
+    pm = np.zeros((H, W), np.uint8)
+    cv2.fillPoly(pm, [((arm-[ox, oy])*Z).astype(np.int32)], 1)
+    pm = cv2.erode(pm, np.ones((3, 3), np.uint8))                      # отойти от края (антиалиас/фон)
+    gx, gy = np.meshgrid(np.arange(W), np.arange(H))
+    wx = gx/Z+ox; wy = gy/Z+oy
+    s = (wx-o[0])*uu[0] + (wy-o[1])*uu[1]
+    m = (pm > 0) & (s >= s0) & (s < s1)
+    px = img[m]
+    if not len(px):
+        return None
+    ss = px.astype(int).sum(1)
+    px = px[ss >= 90]                                                 # без near-чёрного контура (белок костюма оставляем)
+    if not len(px):
+        px = img[m]
+    q = (px // 8) * 8                                                  # квант -> устойчивая мода
+    cols, cnts = np.unique(q.reshape(-1, 3), axis=0, return_counts=True)
+    return tuple(int(v) for v in cols[int(np.argmax(cnts))])
+
+
 def base_fill_color(page, front_drawings_fn):
     """Цвет ДНИЩА/ножки по 2D: доминирующий цвет низа фигуры (там обычно чёрная база/тень)."""
     arr, bx0, by0, Z, mg = front_raster(page, front_drawings_fn)
