@@ -95,6 +95,26 @@ def _stroke_paths(geom, stroke, sw):
     return out
 
 
+def _pix_png_nobg(pix, tol=48):
+    """PNG из пиксмапа с УДАЛЁННЫМ фоном макета (серый беграунд): пиксели цвета углов,
+    СВЯЗАННЫЕ с краем растра, -> прозрачные. Остаётся только фигура (цвета внутри сохраняются)."""
+    import numpy as np, cv2, io
+    from PIL import Image
+    a = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)
+    img = a.copy() if pix.n == 4 else np.dstack([a, np.full(a.shape[:2], 255, np.uint8)])
+    H, W = img.shape[:2]; rgb = img[:, :, :3].astype(int)
+    corners = np.array([img[0, 0, :3], img[0, W - 1, :3], img[H - 1, 0, :3], img[H - 1, W - 1, :3]], int)
+    bg = np.median(corners, axis=0)
+    bgmask = (np.abs(rgb - bg).sum(2) < tol).astype(np.uint8)
+    if bgmask.any():
+        n, lbl = cv2.connectedComponents(bgmask, connectivity=4)      # только фон, связанный с КРАЕМ
+        border = set(lbl[0, :]).union(lbl[H - 1, :], lbl[:, 0], lbl[:, W - 1]); border.discard(0)
+        if border:
+            img[np.isin(lbl, list(border)), 3] = 0
+    buf = io.BytesIO(); Image.fromarray(img, "RGBA").save(buf, "PNG")
+    return buf.getvalue()
+
+
 def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0):
     """Текстура = РАСТР оригинального рендера макета (идеальные цвета, включая ГРАДИЕНТЫ,
     которые get_drawings не воспроизводит), обрезанный по контуру детали через clipPath.
@@ -102,7 +122,7 @@ def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0):
     import base64
     clip = pymupdf.Rect(*src_bbox_pt)
     pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=True)
-    png = base64.b64encode(pix.tobytes("png")).decode()
+    png = base64.b64encode(_pix_png_nobg(pix)).decode()               # убрать фон макета
     x0, y0 = tf(clip.x0, clip.y0); x1, y1 = tf(clip.x1, clip.y1)       # угол панели (аффин без поворота)
     cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in contour.exterior.coords)
     return (f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'
@@ -228,7 +248,7 @@ def _hand_tex(page, poly, src, cid, zoom=6.0):
     ax = np.linalg.lstsq(Mx, dst[:, 0], rcond=None)[0]; ay = np.linalg.lstsq(Mx, dst[:, 1], rcond=None)[0]
     x0, y0 = float(s[:, 0].min()), float(s[:, 1].min()); x1, y1 = float(s[:, 0].max()), float(s[:, 1].max())
     pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=pymupdf.Rect(x0, y0, x1, y1), alpha=True)
-    png = base64.b64encode(pix.tobytes("png")).decode()
+    png = base64.b64encode(_pix_png_nobg(pix)).decode()               # убрать фон макета
     a = ax[0] / zoom; c = ax[1] / zoom; e = ax[0] * x0 + ax[1] * y0 + ax[2]   # пиксель -> src -> аффин(poly)
     b = ay[0] / zoom; d = ay[1] / zoom; ff = ay[0] * x0 + ay[1] * y0 + ay[2]
     cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in poly.exterior.coords)
