@@ -1243,6 +1243,11 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None, wrist=None, 
     # 4) ЦВЕТ ЗОН: детект локтя -> цвет предплечья (кожа) и плеча (рукав) с РЕАЛЬНОЙ руки.
     #    predplechie = цвет предплечья; plecho и baza(полоска крепления) = цвет плеча.
     elbow_cut, fore_color, sh_color = _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip_used, cfg, armpit=armpit, elbow=elbow)
+    wsnap = cfg.get("arm_white_snap")                                # near-белый диапазон -> чистый белый (255,255,255)
+    if wsnap is not None:
+        def _snapw(c):
+            return (255, 255, 255) if (c is not None and min(c) >= wsnap) else c
+        fore_color = _snapw(fore_color); sh_color = _snapw(sh_color)
     if fore_color is None:                                           # зона пустая (короткое предплечье/
         fore_color = sh_color                                       # однородный рукав) -> цвет другой зоны
     if sh_color is None:
