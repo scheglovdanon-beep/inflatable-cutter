@@ -58,10 +58,6 @@ armpit_close_px: 9
 armpit_pair_local_frac: 0.9
 armpit_refine_aspect_relax: 0.7
 arm_template: true
-accent_sat_min: 0.0             # боковина: переносить ВСЕ цвета кромки (не только насыщенные акценты)
-accent_val_min: 0.0             # не гасить тёмные цвета (тёмно-синий рукав) в белый
-outline_dark_thr: 60            # обводкой считаем только near-чёрное (<60); тёмно-синий (sum~65) сэмплим как цвет
-band_merge_small_frac: 0.04     # меньше схлопывать тонкие полосы (синие диски, оранжевые зубцы)
 arrange_sides: false
 print_arrange: true
 assembly_instruction: true

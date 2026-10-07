@@ -316,7 +316,7 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
     arr, bx0, by0, Z, mg = front_raster(page, front_drawings_fn)
     H, W = arr.shape[:2]
     f_mm = fig.s * PT2MM                                              # 1 pt = f_mm мм
-    dark_thr = cfg.get("outline_dark_thr", 170)
+    dark_thr = cfg.get("outline_dark_thr", 55)                       # обводкой считаем только near-чёрное (цвета не теряем)
     skip_max = cfg.get("outline_skip_max_mm", 40.0)
     stab = cfg.get("color_stabilize_mm", 1.5)
     step_mm = 0.7
@@ -342,37 +342,22 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
         n = n / nn
         if not contour_mm.contains(Point(p + n * 2.0)):             # внутрь силуэта
             n = -n
-        if getattr(page, "_flat_colors", False):                    # flat: ДОМИНИРУЮЩИЙ цвет в окне внутрь
-            from collections import Counter                         # (тонкий белый блик края не победит основной)
-            win = cfg.get("flat_sample_window_mm", 18.0)
-            cols = []
-            d = 1.0
-            while d <= min(skip_max, win):
-                c = px_mm(*(p + n * d))
-                if not is_dark(c):
-                    cols.append(tuple(int(v) for v in c))
-                d += step_mm
-            if cols:
-                return Counter(cols).most_common(1)[0][0], True
-            return fallback, False
-        d, last = 1.0, None
-        while d <= skip_max:
-            c = px_mm(*(p + n * d))
-            if not is_dark(c):
-                c2 = px_mm(*(p + n * (d + stab)))
-                if not is_dark(c2):
-                    return tuple(int(v) for v in c2), True          # нашли заливку
+        d, last = 1.0, None                                        # УНИВЕРСАЛЬНО: цвет ПРЯМО У КРОМКИ (первая
+        while d <= skip_max:                                        # стабильная заливка после обводки) — верно для
+            c = px_mm(*(p + n * d))                                 # тонких краевых цветов (зубцы/диски), не уходит в тело
+            if not is_dark(c):                                     # near-чёрное = контур, пропускаем
+                c2 = px_mm(*(p + n * (d + stab)))                 # стабильность: соседний пиксель тоже не тёмный
+                if not is_dark(c2):                               # (тонкий блик/антиалиас в 1px не победит)
+                    return tuple(int(v) // 4 * 4 for v in c2), True
             last = c; d += step_mm
-        return (tuple(int(v) for v in last) if last is not None else fallback), False  # провал (всё тёмное)
+        return (tuple(int(v) for v in last) if last is not None else fallback), False
 
-    sat_min = cfg.get("accent_sat_min", 0.35)                        # только насыщенные акценты
-    val_min = cfg.get("accent_val_min", 0.35)
     for s in layout["strips"]:
         a0, a1 = s["arc0"], s["arc1"]
         flip = s["yn0"] < s["yn1"]
         a_top, a_bot = (a1, a0) if flip else (a0, a1)                 # верх полосы -> к макушке
         L = abs(a1 - a0)
-        M = int(min(140, max(3, L / cfg.get("color_sample_step_mm", 6))))
+        M = int(min(160, max(3, L / cfg.get("color_sample_step_mm", 5))))
         fs = np.linspace(0, 1, M + 1)
         sm = [sample(a_top + (a_bot - a_top) * ((fs[k] + fs[k + 1]) / 2)) for k in range(M)]
         raw_c = [c for c, _ in sm]; ok = [o for _, o in sm]
@@ -382,10 +367,9 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
                            for j in (k - d, k + d) if 0 <= j < M and ok[j]), None)
                 if nb is not None:
                     raw_c[k] = nb
-        cols = [_accentize(c, fallback, sat_min, val_min) for c in raw_c]
-        raw = [(float(fs[k]), float(fs[k + 1]), cols[k]) for k in range(M)]
-        bands = _simplify_bands(raw, fallback, cfg.get("hue_merge_deg", 25.0))        # 1 цвет на акцент
-        s["bands"] = _merge_small_bands(bands, cfg.get("band_merge_small_frac", 0.0)) # скопления мелких -> 1 цвет
+        raw = [(float(fs[k]), float(fs[k + 1]), raw_c[k]) for k in range(M)]          # РЕАЛЬНЫЕ цвета кромки (без accentize)
+        bands = _simplify_bands(raw, fallback, cfg.get("hue_merge_deg", 20.0))        # слить соседние близкие по тону
+        s["bands"] = _merge_small_bands(bands, cfg.get("band_merge_small_frac", 0.03))  # убрать лишь совсем тонкие
 
 
 def strip_band_quads(s):

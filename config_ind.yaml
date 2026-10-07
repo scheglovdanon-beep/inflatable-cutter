@@ -58,8 +58,6 @@ armpit_close_px: 9
 armpit_pair_local_frac: 0.9
 armpit_refine_aspect_relax: 0.7
 arm_template: true
-accent_sat_min: 0.15
-band_merge_small_frac: 0.12
 arrange_sides: false
 print_arrange: true    # печатная раскладка «в ряд»: запаска|рука|лев.боковины|ПЕРЁД|прав.боковины|ЗАД, днище+ножка вниз
 assembly_instruction: true   # инструкция по сборке: копия всех деталей, уменьшенная в 30см, рядом, с рус. подписями
