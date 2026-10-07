@@ -644,6 +644,20 @@ def build_fitting_layout(contour_mm, g, base=None, gap_mm=80.0):
                     "leg": (leg_x, leg_y, leg_w, leg_h)}
         sheet_h = max(sheet_h, leg_y + leg_h + gap_mm)
         sheet_w = max(sheet_w, leg_x + leg_w + gap_mm, dn_x + dw + gap_mm)
+        trans = base.get("transition")                 # переход-воронка (4 части) — ряд ниже ножки
+        if trans:
+            ty = leg_y + leg_h + gap_mm
+            widths = [t.bounds[2] - t.bounds[0] for t in trans]
+            row_w = sum(widths) + gap_mm * (len(trans) - 1)
+            x = cx - row_w / 2.0; placed_t = []
+            for t in trans:
+                tb = t.bounds
+                placed_t.append(_aff.translate(t, x - tb[0], ty - tb[1]))
+                x += (tb[2] - tb[0]) + gap_mm
+            base_out["transition"] = placed_t
+            th_max = max(t.bounds[3] - t.bounds[1] for t in trans)
+            sheet_h = max(sheet_h, ty + th_max + gap_mm)
+            sheet_w = max(sheet_w, cx + row_w / 2.0 + gap_mm)
 
     return {"front": front, "front_x": front_x, "strips": placed,
             "base": base_out, "sheet_w": sheet_w, "sheet_h": sheet_h}

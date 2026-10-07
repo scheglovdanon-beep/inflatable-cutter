@@ -611,6 +611,8 @@ def main():
         if b.get("leg_seam"):
             lb.append(_poly(list(b["leg_seam"].exterior.coords), stroke="#dc0000", sw=lw))
         pieces.append(("nozhka", lb))
+        for ti, tp in enumerate(b.get("transition", [])):               # переход-воронка Ø300->Ø460 (4 части)
+            pieces.append((f"perehod_{ti}", [_poly(list(tp.exterior.coords), fill=base_fill, stroke="#000", sw=lw)]))
 
     # ИНСТРУКЦИЯ ПО СБОРКЕ: копия всех деталей, уменьшенная в прямоугольник шириной 30 см,
     # с русскими подписями. Готовим её контент (кладём либо рядом, либо в рулон печати).

@@ -68,6 +68,10 @@ def _movables(layout):
             if b.get("leg_seam") is not None:
                 b["leg_seam"] = affinity.translate(b["leg_seam"], dx, dy)
         add("leg", b.get("leg_seam") or box(lx, ly, lx + lw, ly + lh), mvleg)
+        for i, tp in enumerate(b.get("transition", [])):               # переход-воронка (части)
+            def mvt(dx, dy, i=i):
+                b["transition"][i] = affinity.translate(b["transition"][i], dx, dy)
+            add("base", b["transition"][i], mvt)
     return items
 
 

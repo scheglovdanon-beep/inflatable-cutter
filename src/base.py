@@ -50,10 +50,16 @@ def build_base_v2(g, cfg):
     ring = top + bot[::-1]                                               # замкнутый контур
     dnishe = Polygon(ring).buffer(0)
     c = (W / 2.0, end_w / 2.0)                                           # центр круга
+    # ПЕРЕХОД-ВОРОНКА Ø circ -> Ø fan, 4 части (развёртка усечённого конуса, по 1/4 окружности)
+    from arm import _develop_frustum
+    fan = cfg["fan_diameter_mm"]                                         # 460 (под вентилятор + ножку)
+    th = cfg.get("transition_height_mm", 150)                           # наклонная высота перехода
+    nparts = cfg.get("transition_parts", 4)
+    trans = [_develop_frustum(math.pi * circ / nparts, math.pi * fan / nparts, th) for _ in range(nparts)]
     return {
         "dnishe": dnishe, "fan_c": c, "fan_d": circ,                     # fan_d здесь = центральный круг 300
-        "bottom_len": L, "width": end_w,
-        "leg_w": math.pi * cfg["fan_diameter_mm"], "leg_h": leg_h,
+        "bottom_len": L, "width": end_w, "transition": trans,
+        "leg_w": math.pi * fan, "leg_h": leg_h,                          # ножка = π·460
         "v2": True,
     }
 
