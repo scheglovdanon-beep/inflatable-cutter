@@ -77,9 +77,9 @@ def build_base(g, cfg):
     # лекало-днище: длина = нижняя кромка переда/зада (стык с ними),
     # ширина = толщина боковины внизу (стык с боковинами). Размеры ВЫВЕДЕНЫ из деталей.
     length = g["bottom_len"]                       # шов с передом и задом
-    width = fan                                    # шов с боковинами (= толщине низа)
+    width = cfg.get("base_width_mm", fan)          # шов с боковинами (= толщине низа); 650 для 4200
     dnishe = Polygon([(0, 0), (length, 0), (length, width), (0, width)])
-    c = (length / 2.0, width / 2.0)                # отверстие вентилятора по центру
+    c = (length / 2.0, width / 2.0)                # отверстие вентилятора по центру (Ø fan, 460)
     return {
         "dnishe": dnishe, "fan_c": c, "fan_d": fan,
         "bottom_len": length, "width": width,

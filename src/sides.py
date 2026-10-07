@@ -488,7 +488,10 @@ def build_gusset(contour_mm, cfg):
         y = line.interpolate(arc).coords[0][1]
         return (ymax - y) / (ymax - ymin)                # 0 низ -> 1 верх (для порядка в раскладке)
 
-    fan_w, main_w, tip_w = cfg["fan_diameter_mm"], cfg["main_width_mm"], cfg.get("tip_width_mm", 250)
+    # fan_w = ширина боковины внизу (= ширина днища, стык с ним); base_width_mm развязывает её от
+    # вент-отверстия fan_diameter_mm (деф. = fan_diameter_mm — старое поведение). 650 для 4200.
+    fan_w = cfg.get("base_width_mm", cfg["fan_diameter_mm"])
+    main_w, tip_w = cfg["main_width_mm"], cfg.get("tip_width_mm", 250)
     C = len(final)
     # edge_taper_single: 460 только на крайнем срезе -> сужение 460->350 в ПЕРВОЙ части (seg0).
     # Иначе (по умолчанию): 460 на двух крайних срезах -> сужение во ВТОРОЙ части.
@@ -520,7 +523,7 @@ def build_gusset(contour_mm, cfg):
 
     return {
         "perimeter": perimeter, "bottom_len": bottom_len, "gusset_len": gusset_len,
-        "thickness_max": cfg["fan_diameter_mm"], "segments": segments, "cuts": final,
+        "thickness_max": cfg.get("base_width_mm", cfg["fan_diameter_mm"]), "segments": segments, "cuts": final,
         "gusset_line": line, "gusset_pts": gusset_pts, "bottom_pts": bottom_pts,
         "corners_xy": [ring[iL], ring[iR]],
     }
