@@ -485,7 +485,10 @@ def build_gusset(contour_mm, cfg):
     # edge_taper_single: 460 только на крайнем срезе -> сужение 460->350 в ПЕРВОЙ части (seg0).
     # Иначе (по умолчанию): 460 на двух крайних срезах -> сужение во ВТОРОЙ части.
     edge = 0 if cfg.get("edge_taper_single", False) else 1
+    gw = cfg.get("gusset_width_mm")                                 # фикс. ширина боковины (все сегменты)
     def t_cut(k):
+        if gw:
+            return gw
         return fan_w if min(k, C - 1 - k) <= edge else main_w
     def prot_of(a, b):
         for a_s, a_e, a_c in prot_specs:

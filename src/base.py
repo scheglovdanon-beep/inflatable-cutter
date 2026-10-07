@@ -9,7 +9,58 @@ import math
 from shapely.geometry import Polygon
 
 
+def _arc_pts(W, s, n=48):
+    """Точки дуги окружности: хорда [0..W] по x, прогиб (сагитта) s вверх (y<0) в центре.
+    Возвращает [(x,y)] от (0,0) до (W,0), центр (W/2,-s)."""
+    if s < 1e-6:
+        return [(0.0, 0.0), (W, 0.0)]
+    R = (s * s + (W / 2.0) ** 2) / (2.0 * s)          # радиус по хорде и сагитте
+    yc = (( W / 2.0) ** 2 - s * s) / (2.0 * s)         # центр дуги ниже (y>0)
+    return [((W * k / n),
+             yc - math.sqrt(max(R * R - (W * k / n - W / 2.0) ** 2, 0.0)))
+            for k in range(n + 1)]
+
+
+def _arclen(W, s):
+    if s < 1e-6:
+        return W
+    R = (s * s + (W / 2.0) ** 2) / (2.0 * s)
+    return 2.0 * R * math.asin(min(1.0, (W / 2.0) / R))
+
+
+def build_base_v2(g, cfg):
+    """Днище v2 (пример заказчика): торцы (стык с боковинами) = ширина боковины; центр —
+    круг base_center_circle_mm; длинные рёбра ЗАКРУГЛЕНЫ (раздув центра до круга), длина
+    каждого ребра == длине низа переда/зада (g['bottom_len']). Круг в центре (переход к венту)."""
+    end_w = cfg.get("gusset_width_mm", cfg.get("main_width_mm", 220))   # торец = ширина боковины
+    circ = cfg.get("base_center_circle_mm", 300)                         # центральный круг
+    leg_h = cfg["leg_height_mm"]
+    L = g["bottom_len"]                                                  # длина закруглённого ребра = низ переда/зада
+    s = max((circ - end_w) / 2.0, 0.0)                                   # раздув (сагитта) на сторону
+    lo, hi = 1.0, max(L, circ)                                           # подобрать хорду W так, чтобы длина дуги == L
+    for _ in range(80):
+        mid = (lo + hi) / 2.0
+        if _arclen(mid, s) < L:
+            lo = mid
+        else:
+            hi = mid
+    W = (lo + hi) / 2.0
+    top = _arc_pts(W, s)                                                 # верхнее ребро (прогиб вверх, y<0)
+    bot = [(x, end_w - y) for x, y in top]                              # нижнее = зеркало к низу (прогиб вниз)
+    ring = top + bot[::-1]                                               # замкнутый контур
+    dnishe = Polygon(ring).buffer(0)
+    c = (W / 2.0, end_w / 2.0)                                           # центр круга
+    return {
+        "dnishe": dnishe, "fan_c": c, "fan_d": circ,                     # fan_d здесь = центральный круг 300
+        "bottom_len": L, "width": end_w,
+        "leg_w": math.pi * cfg["fan_diameter_mm"], "leg_h": leg_h,
+        "v2": True,
+    }
+
+
 def build_base(g, cfg):
+    if cfg.get("base_v2"):
+        return build_base_v2(g, cfg)
     fan = cfg["fan_diameter_mm"]
     leg_h = cfg["leg_height_mm"]
     # лекало-днище: длина = нижняя кромка переда/зада (стык с ними),
