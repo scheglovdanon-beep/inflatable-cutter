@@ -981,9 +981,10 @@ def place_arm(layout, pieces, arm_side, gap=120.0):
         px = base_x + (col_w - p["w"]) / 2.0                      # по центру колонки
         placed.append({**p, "poly": affinity.translate(p["poly"], px, y)})
         y += p["h"] + gap
-    layout["arm_pieces"] = placed
+    layout.setdefault("arm_pieces", []).extend(placed)            # НАКОПЛЕНИЕ (несколько отдельных рук)
     layout["sheet_w"] = max(layout["sheet_w"], base_x + col_w + gap)
     layout["sheet_h"] = max(layout["sheet_h"], y + gap)
+    return placed                                                 # колонка этой руки (для place_hand над ней)
 
 
 def _shift_all_y(layout, dy):
@@ -1007,14 +1008,15 @@ def _shift_all_y(layout, dy):
     layout["sheet_h"] += dy
 
 
-def place_hand(layout, h, arm_side, gap=120.0):
+def place_hand(layout, h, arm_side, gap=120.0, arm_col=None):
     """Детали кисти РЯДОМ, НАД колонкой руки, по порядку шва: левая сторона (перёд) ->
     боковина -> правая сторона (зад). Ряд выровнен по низу над верхом колонки руки;
-    если ряд уходит выше поля — сдвигаем всю раскладку вниз."""
+    если ряд уходит выше поля — сдвигаем всю раскладку вниз.
+    arm_col — колонка ИМЕННО этой руки (для нескольких отдельных рук); иначе все arm_pieces."""
     norm = lambda p: affinity.translate(p, -p.bounds[0], -p.bounds[1])   # к началу координат
     row = [("левая сторона", norm(h["front"])), ("боковина", norm(h["gusset"])),
            ("правая сторона", norm(h["back"]))]
-    aps = layout.get("arm_pieces", [])
+    aps = arm_col if arm_col is not None else layout.get("arm_pieces", [])
     if aps:
         xs0 = min(ap["poly"].bounds[0] for ap in aps); xs1 = max(ap["poly"].bounds[2] for ap in aps)
         col_cx = (xs0 + xs1) / 2.0
@@ -1032,7 +1034,7 @@ def place_hand(layout, h, arm_side, gap=120.0):
         placed.append({"name": name, "poly": affinity.translate(p, x, bottom - ph),
                        "w": pw, "h": ph, "src": src})
         x += pw + gap
-    layout["hand_pieces"] = placed
+    layout.setdefault("hand_pieces", []).extend(placed)                  # НАКОПЛЕНИЕ (несколько отдельных кистей)
     miny = min(pl["poly"].bounds[1] for pl in placed)
     if miny < gap:                                                       # не вылезать за верх поля
         _shift_all_y(layout, gap - miny)

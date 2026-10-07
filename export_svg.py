@@ -134,13 +134,22 @@ def build_layout(page, cfg):
         if cfg.get("arm_template"):                             # РУКА ПО ШАБЛОНУ: база→плечо→предплечье→кисть
             from arm import build_arm_from_poly                 # place_arm/place_hand — уже на уровне модуля (не шадовить)
             scale = fig.s * PT2MM
-            if cut_arms:                                        # руки ОДИНАКОВЫ -> строим ОДНУ (первую), копия = запаска
+            if cut_arms and cfg.get("arms_identical"):         # РУКИ ОДИНАКОВЫ -> строим ОДНУ, копия = запаска
                 ca0 = cut_arms[0]
                 res = build_arm_from_poly(page, ca0["poly_pt"], ca0["tip"], scale, cfg, armpit=ca0.get("f"),
                                           wrist=ca0.get("wrist"), elbow=ca0.get("elbow"))
                 place_arm(lay, res["pieces"], "left")          # снизу вверх: база, плечо, предплечье
                 place_hand(lay, res["hand"], "left")           # кисть (перёд|боковина|зад) над рукой
                 arm_pts = np.asarray(res["hand"]["src_pts"], float)   # для текстуры кисти (arm_dds)
+            else:                                              # РУКИ РАЗНЫЕ -> строим КАЖДУЮ отдельно (своя колонка+кисть)
+                for i, ca in enumerate(cut_arms):
+                    res = build_arm_from_poly(page, ca["poly_pt"], ca["tip"], scale, cfg, armpit=ca.get("f"),
+                                              wrist=ca.get("wrist"), elbow=ca.get("elbow"))
+                    side = "left" if i == 0 else "right"       # 1-я — колонка слева, 2-я — справа
+                    col = place_arm(lay, res["pieces"], side)
+                    place_hand(lay, res["hand"], side, arm_col=col)
+                    if arm_pts is None:
+                        arm_pts = np.asarray(res["hand"]["src_pts"], float)
             for ca in cut_arms:                                # ОТВЕРСТИЕ под КАЖДУЮ руку (на своей боковине)
                 place_armpit_hole(lay, g, contour_mm, ca["f"], fig, cfg)
         else:                                                  # отрезанная рука ОДНИМ куском (текстура)

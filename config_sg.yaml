@@ -41,6 +41,7 @@ arm_from_contour: false
 make_base: true
 make_back: true
 back_from_front: true   # симметричная роза: зад = копия переда (та же форма+текстура, без зазоров)
+arms_identical: true    # роза: руки одинаковы -> одно лекало + копия (запаска)
 repack: false
 roll_pack: false
 roll_width_mm: 1440
