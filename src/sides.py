@@ -302,18 +302,26 @@ def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg):
     f_mm = fig.s * PT2MM
     ax = armpit_pt[0] * f_mm; ay = armpit_pt[1] * f_mm              # подмышка в мм (как contour_mm)
     arc = g["gusset_line"].project(Point(ax, ay))                  # позиция вдоль гассета
-    piece_i = next((seg["i"] for seg in g["segments"]
-                    if seg["arc0"] <= arc <= seg["arc1"]), None)
-    if piece_i is None:
+    seg = next((s for s in g["segments"] if s["arc0"] <= arc <= s["arc1"]), None)
+    if seg is None:
         return
+    piece_i = seg["i"]
     s = next((x for x in layout["strips"] if x["i"] == piece_i), None)
     if s is None:
         return
     xs = [p[0] for p in s["poly"]]; ys = [p[1] for p in s["poly"]]
     R = cfg.get("arm_hole_diameter_mm", 250) / 2.0
     m = cfg.get("arm_hole_top_margin_mm", 20)
+    stop, sbot = min(ys), max(ys); Ls = sbot - stop
+    if cfg.get("arm_hole_at_armpit"):                              # НИЗ отверстия = точка подмышки (круг вверх)
+        flip = seg["yn0"] < seg["yn1"]                            # верх полоски -> к макушке фигуры
+        a_top, a_bot = (seg["arc1"], seg["arc0"]) if flip else (seg["arc0"], seg["arc1"])
+        y_arm = stop + (arc - a_top) / ((a_bot - a_top) or 1.0) * Ls   # подмышка на полоске
+        cy = min(max(y_arm - R, stop + m + R), sbot - m - R)      # низ круга на подмышке, в пределах полоски
+    else:
+        cy = stop + m + R                                         # старое: у верха полоски
     layout.setdefault("arm_holes", []).append(
-        {"cx": (min(xs) + max(xs)) / 2.0, "cy": min(ys) + m + R, "r": R, "piece": piece_i})
+        {"cx": (min(xs) + max(xs)) / 2.0, "cy": cy, "r": R, "piece": piece_i})
 
 
 def contour_to_mm(fig):

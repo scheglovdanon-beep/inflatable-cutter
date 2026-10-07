@@ -23,6 +23,7 @@ neck_smooth_mm: 40
 neck_min_drop: 0.12
 arm_side: auto
 arm_hole_diameter_mm: 154
+arm_hole_at_armpit: true       # низ отверстия на точке подмышки (1700)
 arm_hole_top_margin_mm: 20
 base_diameter_mm: 460
 leg_height_mm: 150
