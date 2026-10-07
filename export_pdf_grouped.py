@@ -448,7 +448,7 @@ def main():
     from sides import get_arm_contour
     arm_fill = HEX(arm_fill_color(page, arm_pts if arm_pts is not None else get_arm_contour(page)[0])) \
         if (lay.get("arm_pieces") or lay.get("spare_arm")) else "none"
-    base_fill = HEX(base_fill_color(page, front_drawings)) if lay.get("base") else "none"
+    base_fill = HEX(base_fill_color(page, front_drawings, fig.contour_pt)) if lay.get("base") else "none"
     from side_color import hand_fill_color
     _hsrc = next((hp.get("src") for hp in lay.get("hand_pieces", []) if hp.get("src") is not None), None)
     hand_fill = HEX(hand_fill_color(page, _hsrc)) if _hsrc is not None else "#f5f5f5"  # полоска-боковина кисти

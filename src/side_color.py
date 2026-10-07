@@ -273,16 +273,32 @@ def arm_zone_color_raster(page, arm_poly, origin, u, s0, s1, cfg):
     return tuple(int(v) for v in cols[int(np.argmax(cnts))])
 
 
-def base_fill_color(page, front_drawings_fn):
-    """Цвет ДНИЩА/ножки по 2D: доминирующий цвет низа фигуры (там обычно чёрная база/тень)."""
+def base_fill_color(page, front_drawings_fn, contour_pt=None):
+    """Цвет ДНИЩА (и перехода+ножки): ДОМИНИРУЮЩИЙ реальный цвет НИЗА ПЕРЕДА — по пикселям
+    ВНУТРИ контура фигуры (сапоги/база/тень — что реально внизу), НЕ фон/земля под фигурой.
+    Мода по нижней полосе фигуры, квант /8, без near-чёрного тонкого контура."""
+    import numpy as np, cv2
     arr, bx0, by0, Z, mg = front_raster(page, front_drawings_fn)
     H, W = arr.shape[:2]
-    band = arr[int(H * 0.93):H, int(W * 0.3):int(W * 0.7)].reshape(-1, 3)
-    band = band[band.sum(1) < 740]                                   # не белый фон
-    if not len(band):
+    if contour_pt is not None:                                       # маска силуэта в координатах растра
+        pts = np.array([[(x - bx0 + mg) * Z, (y - by0 + mg) * Z] for x, y in contour_pt.exterior.coords], np.int32)
+        mask = np.zeros((H, W), np.uint8); cv2.fillPoly(mask, [pts], 1)
+    else:
+        mask = (arr.astype(int).sum(2) < 740).astype(np.uint8)       # запас: не-белое
+    ys = np.where(mask.any(1))[0]
+    if not len(ys):
         return (0, 0, 0)
-    from collections import Counter
-    return tuple(int(x) for x in Counter(map(tuple, band)).most_common(1)[0][0])
+    y0b, y1b = ys.min(), ys.max()
+    y_lo = int(y1b - 0.12 * (y1b - y0b))                             # нижние 12% ВЫСОТЫ фигуры
+    reg = arr[y_lo:y1b + 1].reshape(-1, 3).astype(int)
+    m = mask[y_lo:y1b + 1].reshape(-1).astype(bool)
+    px = reg[m]
+    px = px[px.sum(1) >= 48]                                         # без near-чёрного контура (тонкий)
+    if not len(px):
+        return (0, 0, 0)
+    q = (px // 8) * 8
+    cols, cnts = np.unique(q, axis=0, return_counts=True)
+    return tuple(int(v) for v in cols[int(np.argmax(cnts))])
 
 
 def _edges_top_down(poly, has_waist):
