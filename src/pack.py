@@ -173,26 +173,22 @@ def arrange_print(layout, gap=120.0):
 
     # ДНИЩЕ — под ПЕРЕДОМ (по центру оси переда), НОЖКА — под днищем (стопкой вниз).
     # Ставим НИЖЕ самой длинной колонки (bottom), чтобы ничего не было сбоку -> нет касаний.
-    dn = cats.get("base", []); leg = cats.get("leg", [])
+    dn = cats.get("base", []); leg = cats.get("leg", []); tr = cats.get("transition", [])
     y = bottom + gap
-    for grp in (dn, leg):
-        for it in grp:
-            it["mv"](front_cx - (it["x"] + it["w"] / 2.0), y - it["y"])
-            y += it["h"] + gap
-        if grp:
-            bottom = max(bottom, y - gap)
-
-    tr = cats.get("transition", [])                                   # ПЕРЕХОД — отдельным РЯДОМ (по центру под низом)
-    if tr:
-        y = bottom + gap
+    for it in dn:                                                     # 1) ДНИЩЕ
+        it["mv"](front_cx - (it["x"] + it["w"] / 2.0), y - it["y"]); y += it["h"] + gap
+    if tr:                                                            # 2) ПЕРЕХОД — рядом (по центру)
         row_w = sum(it["w"] for it in tr) + gap * (len(tr) - 1)
         xx = front_cx - row_w / 2.0
         for it in tr:
-            it["mv"](xx - it["x"], y - it["y"])
-            xx += it["w"] + gap
-        bottom = max(bottom, y + max(it["h"] for it in tr))
+            it["mv"](xx - it["x"], y - it["y"]); xx += it["w"] + gap
+        y += max(it["h"] for it in tr) + gap
+    for it in leg:                                                    # 3) НОЖКА
+        it["mv"](front_cx - (it["x"] + it["w"] / 2.0), y - it["y"]); y += it["h"] + gap
+    bottom = max(bottom, y - gap)
 
-    layout["sheet_w"] = max(x + gap, (front_cx + (sum(it["w"] for it in tr) + gap * (len(tr) - 1)) / 2.0 + gap) if tr else 0)
+    row_tr = (sum(it["w"] for it in tr) + gap * (len(tr) - 1)) if tr else 0
+    layout["sheet_w"] = max(x + gap, front_cx + row_tr / 2.0 + gap)
     layout["sheet_h"] = bottom + gap
 
 
