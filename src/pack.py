@@ -133,10 +133,21 @@ def arrange_print(layout, gap=120.0):
             y += (by1 - by0) + gap; maxw = max(maxw, bx1 - bx0)
         return maxw, y - gap
 
-    # колонки: руки — ОДИН блок каждая; боковины/перёд/зад — по одному элементу-блоку
+    def _cluster(lst, gapx=400.0):
+        """Разбить детали на блоки по близости X (несколько ОТДЕЛЬНЫХ рук -> отдельные блоки,
+        иначе одна рука у лев.края + другая у прав.края склеивались в один блок с дырой)."""
+        if not lst:
+            return []
+        lst = sorted(lst, key=lambda it: it["x"]); blocks = [[lst[0]]]
+        for it in lst[1:]:
+            right = max(c["x"] + c["w"] for c in blocks[-1])
+            (blocks[-1] if it["x"] - right <= gapx else blocks.append([]) or blocks[-1]).append(it)
+        return blocks
+
+    # колонки: каждая рука — свой блок (стопкой); боковины/перёд/зад — по одному элементу-блоку
     columns = [
-        [cats.get("arm_spare", [])] if cats.get("arm_spare") else [],   # запасная рука (блок)
-        [cats.get("arm_main", [])] if cats.get("arm_main") else [],     # рука (блок)
+        _cluster(cats.get("arm_spare", [])),                            # запасная рука (блок/и)
+        _cluster(cats.get("arm_main", [])),                             # руки: каждая — свой блок, стопкой
         [[it] for it in cats.get("strip_left", [])],                    # левые боковины (стопка)
         [[it] for it in cats.get("front", [])],                         # ПЕРЁД
         [[it] for it in cats.get("strip_right", [])],                   # правые боковины (стопка)
