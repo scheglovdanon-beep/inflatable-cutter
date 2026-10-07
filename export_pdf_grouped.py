@@ -501,9 +501,7 @@ def main():
         return "\n".join(out)
 
     # ПЕРЁД (текстура ОБРЕЗАНА по контуру + контур + припуск + цветной ключ-полоса — одна группа)
-    fr_in = _near_fills(front_drawings(page, cfg)[0], fig.contour_pt)
-    _frs = [d["rect"] for d in fr_in]
-    fr_bbox = (min(r.x0 for r in _frs), min(r.y0 for r in _frs), max(r.x1 for r in _frs), max(r.y1 for r in _frs))
+    fr_bbox = fig.contour_pt.bounds                                   # bbox КОНТУРА (покрывает всю панель, без зазоров)
     pieces.append(("front", [_design_raster(page, fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm), lay["front"], nextid()),
                              _poly(list(lay["front"].exterior.coords), stroke="#000", sw=lw),
                              _poly(list(lay["front_seam"].exterior.coords), stroke="#dc0000", sw=lw),
@@ -513,9 +511,8 @@ def main():
     bk = lay.get("back")
     if bk:
         from sides import back_drawings
-        bk_in = _near_fills(back_drawings(page, cfg)[0], bk["cut_pt"]) if bk.get("cut_pt") else back_drawings(page, cfg)[0]
-        _brs = [d["rect"] for d in bk_in]
-        bk_bbox = (min(r.x0 for r in _brs), min(r.y0 for r in _brs), max(r.x1 for r in _brs), max(r.y1 for r in _brs))
+        bk_bbox = bk["cut_pt"].bounds if bk.get("cut_pt") else bk["src"].bounds   # bbox КОНТУРА зада
+        # from_front: зад — копия переда, текстуру берём с ПЕРЕДА (симметричная фигура)
         bbody = [_design_raster(page, bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["poly"], nextid()),
                  _poly(list(bk["poly"].exterior.coords), stroke="#000", sw=lw)]
         if bk.get("seam"):

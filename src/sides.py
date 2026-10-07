@@ -228,8 +228,12 @@ def add_back_panel(layout, contour_mm, fig, cfg, page, gap=120.0):
     Вызывать ПОСЛЕ размещения руки, ДО запаски."""
     if not cfg.get("make_back"):
         return
-    bfig = get_back_figure(page, cfg)
-    if cfg.get("arm_cut") == "armpit":                               # зад тоже обрезаем по контуру БЕЗ руки
+    from_front = bool(cfg.get("back_from_front"))                    # симметричная фигура: зад = копия ПЕРЕДА
+    if from_front:                                                   # (та же обрезанная форма и текстура -> без
+        bfig = fig                                                  # рассинхрона формы/зазоров/ключа)
+    else:
+        bfig = get_back_figure(page, cfg)
+    if not from_front and cfg.get("arm_cut") == "armpit":           # зад тоже обрезаем по контуру БЕЗ руки
         from arm import cut_waving_arms
         bcfg = cfg
         man = cfg.get("manual_arms")
@@ -262,7 +266,8 @@ def add_back_panel(layout, contour_mm, fig, cfg, page, gap=120.0):
     back = affinity.translate(bcm, bdx, bdy)
     layout["back"] = {"poly": back, "f_mm": bfig.s * PT2MM, "bdx": bdx, "bdy": bdy,
                       "src": affinity.translate(bcm, 0, 0),         # исходный контур (для solve-affine текстуры)
-                      "cut_pt": bfig.contour_pt}                    # обрезанный контур зада (PT) — фильтр заливок руки
+                      "cut_pt": bfig.contour_pt,                    # обрезанный контур зада (PT) — фильтр заливок руки
+                      "from_front": from_front}                     # True -> текстуру зада брать с ПЕРЕДА (симметр.)
     layout["sheet_h"] = max(layout["sheet_h"], by + (bcm.bounds[3] - bcm.bounds[1]) + gap)
 
 
