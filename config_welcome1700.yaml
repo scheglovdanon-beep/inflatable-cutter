@@ -1,4 +1,4 @@
-target_height_mm: 1500
+target_height_mm: 1700
 front_smooth_mm: 140
 expected_arms: 1
 seam_allowance_mm: 10
