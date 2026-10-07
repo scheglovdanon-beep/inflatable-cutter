@@ -103,8 +103,13 @@ def _pix_png_nobg(pix, tol=48):
     a = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)
     img = a.copy() if pix.n == 4 else np.dstack([a, np.full(a.shape[:2], 255, np.uint8)])
     H, W = img.shape[:2]; rgb = img[:, :, :3].astype(int)
-    corners = np.array([img[0, 0, :3], img[0, W - 1, :3], img[H - 1, 0, :3], img[H - 1, W - 1, :3]], int)
-    bg = np.median(corners, axis=0)
+    tw = max(2, int(H * 0.03)); sw = max(2, int(W * 0.03))            # фон = МОДА рамки (краёв), не углов
+    frame = np.concatenate([rgb[:tw].reshape(-1, 3), rgb[-tw:].reshape(-1, 3),
+                            rgb[:, :sw].reshape(-1, 3), rgb[:, -sw:].reshape(-1, 3)])
+    q = (frame // 8) * 8; cols, cnts = np.unique(q, axis=0, return_counts=True)
+    bg = cols[int(np.argmax(cnts))]                                  # доминирующий цвет рамки = фон
+    if bg.sum() >= 720:                                               # фон near-белый (= бумага) -> НЕ удалять
+        buf = io.BytesIO(); Image.fromarray(img, "RGBA").save(buf, "PNG"); return buf.getvalue()  # иначе съест белое/чёрное фигуры
     bgmask = (np.abs(rgb - bg).sum(2) < tol).astype(np.uint8)
     if bgmask.any():
         n, lbl = cv2.connectedComponents(bgmask, connectivity=4)      # только фон, связанный с КРАЕМ
@@ -115,14 +120,15 @@ def _pix_png_nobg(pix, tol=48):
     return buf.getvalue()
 
 
-def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0):
-    """Текстура = РАСТР оригинального рендера макета (идеальные цвета, включая ГРАДИЕНТЫ,
-    которые get_drawings не воспроизводит), обрезанный по контуру детали через clipPath.
-    src_bbox_pt — bbox исходных заливок детали (pt); tf — аффин pt-макета -> мм-панели."""
+def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0, strip_bg=False):
+    """Текстура = РАСТР оригинального рендера макета КАК ЕСТЬ (идеальные цвета, градиенты,
+    чёрная обводка/плашки — всё точно из макета), обрезанный по контуру детали через clipPath.
+    strip_bg=True — доп. убрать цветной фон макета (только где он реально есть; по умолчанию НЕ
+    трогаем, иначе съедает чёрную обводку/светлые части фигуры)."""
     import base64
     clip = pymupdf.Rect(*src_bbox_pt)
     pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=True)
-    png = base64.b64encode(_pix_png_nobg(pix)).decode()               # убрать фон макета
+    png = base64.b64encode(_pix_png_nobg(pix) if strip_bg else pix.tobytes("png")).decode()
     x0, y0 = tf(clip.x0, clip.y0); x1, y1 = tf(clip.x1, clip.y1)       # угол панели (аффин без поворота)
     cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in contour.exterior.coords)
     return (f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'
@@ -236,7 +242,7 @@ def _design_clipped(dds, tf, f_mm, contour, title):
     return "\n".join(out)
 
 
-def _hand_tex(page, poly, src, cid, zoom=6.0):
+def _hand_tex(page, poly, src, cid, zoom=6.0, strip_bg=False):
     """Текстура кисти = РАСТР оригинала (идеальные цвета вкл. градиенты), размещённый аффином
     src(pt)->poly через SVG matrix (корректно и для зеркальной «правой стороны»), клип по
     контуру кисти. Вектор-пересборка теряла градиенты (ладонь выходила серой/без контура)."""
@@ -248,7 +254,7 @@ def _hand_tex(page, poly, src, cid, zoom=6.0):
     ax = np.linalg.lstsq(Mx, dst[:, 0], rcond=None)[0]; ay = np.linalg.lstsq(Mx, dst[:, 1], rcond=None)[0]
     x0, y0 = float(s[:, 0].min()), float(s[:, 1].min()); x1, y1 = float(s[:, 0].max()), float(s[:, 1].max())
     pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=pymupdf.Rect(x0, y0, x1, y1), alpha=True)
-    png = base64.b64encode(_pix_png_nobg(pix)).decode()               # убрать фон макета
+    png = base64.b64encode(_pix_png_nobg(pix) if strip_bg else pix.tobytes("png")).decode()
     a = ax[0] / zoom; c = ax[1] / zoom; e = ax[0] * x0 + ax[1] * y0 + ax[2]   # пиксель -> src -> аффин(poly)
     b = ay[0] / zoom; d = ay[1] / zoom; ff = ay[0] * x0 + ay[1] * y0 + ay[2]
     cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in poly.exterior.coords)
@@ -541,7 +547,7 @@ def main():
 
     # ПЕРЁД (текстура ОБРЕЗАНА по контуру + контур + припуск + цветной ключ-полоса — одна группа)
     fr_bbox = fig.contour_pt.bounds                                   # bbox КОНТУРА (покрывает всю панель, без зазоров)
-    pieces.append(("front", [_design_raster(page, fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm), lay["front"], nextid()),
+    pieces.append(("front", [_design_raster(page, fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm), lay["front"], nextid(), strip_bg=cfg.get("strip_bg", False)),
                              _poly(list(lay["front"].exterior.coords), stroke="#000", sw=lw),
                              _poly(list(lay["front_seam"].exterior.coords), stroke="#dc0000", sw=lw),
                              _arc_paths(front_arcs, lay["front"], "seam_front")]))
@@ -552,7 +558,7 @@ def main():
         from sides import back_drawings
         bk_bbox = bk["cut_pt"].bounds if bk.get("cut_pt") else bk["src"].bounds   # bbox КОНТУРА зада
         # from_front: зад — копия переда, текстуру берём с ПЕРЕДА (симметричная фигура)
-        bbody = [_design_raster(page, bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["poly"], nextid()),
+        bbody = [_design_raster(page, bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["poly"], nextid(), strip_bg=cfg.get("strip_bg", False)),
                  _poly(list(bk["poly"].exterior.coords), stroke="#000", sw=lw)]
         if bk.get("seam"):
             bbody.append(_poly(list(bk["seam"].exterior.coords), stroke="#dc0000", sw=lw))
