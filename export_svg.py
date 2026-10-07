@@ -182,7 +182,7 @@ def build_layout(page, cfg):
     elif cfg.get("repack"):                                      # разложить без наложений
         from pack import repack_layout
         repack_layout(lay, gap=2 * seam_mm + 40)
-    add_seams(lay, seam_mm)
+    add_seams(lay, seam_mm, arm_hole_seam=not cfg.get("arm_hole_no_seam"))
     return lay, fig, contour_mm, g, arm_pts, seam_mm
 
 

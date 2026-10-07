@@ -10,7 +10,7 @@ def _out(poly, mm):
     return poly.buffer(mm, join_style=2, mitre_limit=3.0)        # параллельный отступ, острые углы
 
 
-def add_seams(layout, seam_mm):
+def add_seams(layout, seam_mm, arm_hole_seam=True):
     """Добавить припуск каждому лекалу раскладки. Контуры реза пишутся в сами детали:
     front_seam / strips[i]['seam'] / arm_pieces[i]['seam'] / hand_pieces[i]['seam'] /
     base: dnishe_seam, leg_seam, fan_seam(внутрь), arm_hole seam(внутрь)."""
@@ -36,11 +36,12 @@ def add_seams(layout, seam_mm):
             b["leg_seam"] = _out(box(lx, ly, lx + lw, ly + lh), seam_mm)
         fx, fy = b["fan_c"]; fr = b["fan_d"] / 2.0
         b["fan_seam_r"] = max(1.0, fr - seam_mm)                  # отверстие вентилятора: припуск внутрь
-    ah = layout.get("arm_hole")
-    if ah:
-        ah["seam_r"] = max(1.0, ah["r"] - seam_mm)               # отверстие руки: припуск внутрь
-    for ah in layout.get("arm_holes", []):                        # отверстия рук (список): припуск внутрь
-        ah["seam_r"] = max(1.0, ah["r"] - seam_mm)
+    if arm_hole_seam:                                            # припуск-круг у отверстия руки (можно выключить)
+        ah = layout.get("arm_hole")
+        if ah:
+            ah["seam_r"] = max(1.0, ah["r"] - seam_mm)           # отверстие руки: припуск внутрь
+        for ah in layout.get("arm_holes", []):                    # отверстия рук (список): припуск внутрь
+            ah["seam_r"] = max(1.0, ah["r"] - seam_mm)
 
 
 def draw_dashed(dr, pts, color, dash=9, gap=6, width=2):
