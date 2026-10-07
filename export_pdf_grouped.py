@@ -362,6 +362,10 @@ def _bbox_for(name, lay):
     if name == "nozhka" and lay.get("base"):
         b = lay["base"]; lx, ly, lw, lh = b["leg"]
         return (b.get("leg_seam") or _bx(lx, ly, lx + lw, ly + lh)).bounds
+    if name.startswith("perehod_") and lay.get("base"):
+        tr = lay["base"].get("transition", [])
+        i = int(name.split("_")[1])
+        return tr[i].bounds if i < len(tr) else None
     return None
 
 
@@ -396,6 +400,10 @@ def _poly_for(name, lay):
     if name == "nozhka" and lay.get("base"):
         b = lay["base"]; lx, ly, lw, lh = b["leg"]
         return b.get("leg_seam") or _bx(lx, ly, lx + lw, ly + lh)
+    if name.startswith("perehod_") and lay.get("base"):               # детали перехода 300->460
+        tr = lay["base"].get("transition", [])
+        i = int(name.split("_")[1])
+        return tr[i] if i < len(tr) else None
     return None
 
 
