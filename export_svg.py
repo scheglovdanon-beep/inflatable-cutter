@@ -135,7 +135,8 @@ def build_layout(page, cfg):
             from arm import build_arm_from_poly                 # place_arm/place_hand — уже на уровне модуля (не шадовить)
             scale = fig.s * PT2MM
             for i, ca in enumerate(cut_arms):
-                res = build_arm_from_poly(page, ca["poly_pt"], ca["tip"], scale, cfg, armpit=ca.get("f"))
+                res = build_arm_from_poly(page, ca["poly_pt"], ca["tip"], scale, cfg, armpit=ca.get("f"),
+                                          wrist=ca.get("wrist"), elbow=ca.get("elbow"))
                 side = "left" if i == 0 else "right"           # 1-я рука — колонка слева, 2-я — справа
                 place_arm(lay, res["pieces"], side)            # снизу вверх: база, плечо, предплечье
                 place_hand(lay, res["hand"], side)             # кисть (перёд|боковина|зад) над рукой

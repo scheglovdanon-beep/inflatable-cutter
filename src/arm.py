@@ -621,7 +621,8 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
                 continue
             body_pt = body2
             exc = body_pt.exterior                                    # контур изменился после реза
-            cut.append({"poly_pt": arm_poly, "f": f, "tip": tip})
+            cut.append({"poly_pt": arm_poly, "f": f, "tip": tip,
+                        "wrist": m.get("wrist"), "elbow": m.get("elbow")})  # ручные срезы запястья/локтя (опц.)
         return body_pt, cut
     if cfg.get("arm_detect_v2"):                                      # v2: вертикальный рез у корня + валидация кистью
         arms2, body2 = detect_arms_v2(page, body_pt, cfg)
@@ -1195,7 +1196,7 @@ def _wrist_on_poly(page, arm_pt, tip, cfg, armpit=None):
     return best[2], tip, best[1]
 
 
-def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None):
+def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None, wrist=None, elbow=None):
     """РУКА ПО ЭТАЛОННОМУ ШАБЛОНУ (examples/arm_template.pdf, фикс. форма для фигуры 2700,
     Ø250) + КИСТЬ, задетектированная из НАШЕГО вырезанного полигона руки (detect_armpits).
 
@@ -1217,7 +1218,14 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None):
         tip = tuple(arm_arr[int(np.argmax(_d))])                    # изгиб и запястье уезжает к манжету (кисть=вся рука)
 
     # 1) запястье + рез на (кисть, предплечье) — ТОЛЬКО для получения формы кисти
-    wrist, tip_used, wmethod = _wrist_on_poly(page, arm_arr, tip, cfg, armpit=armpit)
+    if wrist is not None:                                             # РУЧНОЙ срез запястья: концы привязать к контуру
+        from shapely.geometry import Point as _Pt
+        exc = arm_poly.exterior
+        B = np.asarray(exc.interpolate(exc.project(_Pt(*wrist[0]))).coords[0], float)
+        T = np.asarray(exc.interpolate(exc.project(_Pt(*wrist[1]))).coords[0], float)
+        wrist = (tuple(B), tuple(T)); tip_used = tuple(tip); wmethod = "manual"
+    else:
+        wrist, tip_used, wmethod = _wrist_on_poly(page, arm_arr, tip, cfg, armpit=armpit)
     hand_pts, fore_pts = cut_arm(arm_arr, wrist, tip_used)
 
     # 2) ЭТАЛОННАЯ рука (фикс. шаблон 2700, Ø250): база/плечо/предплечье
@@ -1234,7 +1242,7 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None):
 
     # 4) ЦВЕТ ЗОН: детект локтя -> цвет предплечья (кожа) и плеча (рукав) с РЕАЛЬНОЙ руки.
     #    predplechie = цвет предплечья; plecho и baza(полоска крепления) = цвет плеча.
-    elbow_cut, fore_color, sh_color = _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip_used, cfg, armpit=armpit)
+    elbow_cut, fore_color, sh_color = _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip_used, cfg, armpit=armpit, elbow=elbow)
     if fore_color is None:                                           # зона пустая (короткое предплечье/
         fore_color = sh_color                                       # однородный рукав) -> цвет другой зоны
     if sh_color is None:
@@ -1522,7 +1530,7 @@ def _elbow_by_color_edges(page, arm_poly, arm_arr, wrist, tip, cfg):
     return None
 
 
-def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg, armpit=None):
+def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg, armpit=None, elbow=None):
     """Локоть = самая глубокая вогнутость контура руки в осевой полосе между запястьем и
     подмышкой. Делит руку на предплечье (запястье..локоть) и плечо (локоть..подмышка);
     возвращает (elbow_chord, fore_color, sh_color). Цвета берутся из 2D по зонам.
@@ -1539,6 +1547,16 @@ def _arm_zone_colors(page, arm_poly, arm_arr, wrist, tip, cfg, armpit=None):
     if L < 1e-6:
         return None, None, None
     u = u / L
+    if elbow is not None:                                            # РУЧНОЙ срез локтя: концы привязать к контуру
+        exc = arm_poly.exterior
+        from shapely.geometry import Point as _Pt
+        ea = np.asarray(exc.interpolate(exc.project(_Pt(*elbow[0]))).coords[0], float)
+        eb = np.asarray(exc.interpolate(exc.project(_Pt(*elbow[1]))).coords[0], float)
+        emid = (ea + eb) / 2.0
+        elbow_s = float((emid - wmid) @ u); elbow_p = emid
+        fore = arm_zone_color(page, arm_poly, wmid, u, 0.0, elbow_s)
+        sh = arm_zone_color(page, arm_poly, wmid, u, elbow_s, L)
+        return (tuple(ea), tuple(eb)), fore, sh
     esc = _elbow_color_s(page, arm_poly, wmid, u, L, cfg)            # 1) цветовой переход рукав<->кожа (манжет)
     emax = cfg.get("elbow_max_frac")                                 # цветовой переход у ПЛЕЧА (пад/корпус), не локоть:
     if esc is not None and emax is not None and esc > emax * L:      # слишком близко к подмышке -> это не локоть,
