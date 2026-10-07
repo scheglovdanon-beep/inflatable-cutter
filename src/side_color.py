@@ -265,8 +265,8 @@ def arm_zone_color_raster(page, arm_poly, origin, u, s0, s1, cfg):
     if not len(px):
         return None
     ss = px.astype(int).sum(1)
-    px = px[ss >= 90]                                                 # без near-чёрного контура (белок костюма оставляем)
-    if not len(px):
+    px = px[ss >= 40]                                                 # режем только чистый чёрный контур (тёмно-синий
+    if not len(px):                                                  # рукав ~(6,14,45) оставляем — иначе зона ложно белеет)
         px = img[m]
     q = (px // 8) * 8                                                  # квант -> устойчивая мода
     cols, cnts = np.unique(q.reshape(-1, 3), axis=0, return_counts=True)
