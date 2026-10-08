@@ -126,6 +126,8 @@ def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None):
         if a.get("elbow"):
             m["elbow"] = [[float(a["elbow"][0][0]), float(a["elbow"][0][1])],
                           [float(a["elbow"][1][0]), float(a["elbow"][1][1])]]
+        if a.get("hole_dy"):
+            m["hole_dy"] = float(a["hole_dy"])                        # ручной сдвиг отверстия руки (мм)
         man.append(m)
     cfg["manual_arms"] = man
     return cfg
@@ -442,47 +444,40 @@ def front_preview():
         ext = front.exterior; L = ext.length
         fmm = fig.s * PT2MM                                          # contour_to_mm = чистый масштаб ×fmm от origin
         D = float(cfg.get("arm_hole_diameter_mm", 250))
-        segs = []
-        for m in cfg.get("manual_arms", []):
-            pm = (m["f"][0] * fmm, m["f"][1] * fmm)                  # подмышка в мм (тот же масштаб)
-            s0 = ext.project(Point(pm))
-            a = substring(ext, max(0.0, s0 - D), s0)
-            b = substring(ext, s0, min(L, s0 + D))
-            seg = a if a.centroid.y <= b.centroid.y else b            # вверх (меньший y)
-            segs.append(list(seg.coords))
-        # рендер
         bx0, by0, bx1, by1 = front.bounds; mg = 30.0
         sc = 1000.0 / max(bx1 - bx0, by1 - by0)
         W = int((bx1 - bx0) * sc + 2 * mg); H = int((by1 - by0) * sc + 2 * mg)
-        im = Image.new("RGB", (W, H), (255, 255, 255)); dr = ImageDraw.Draw(im)
         T = lambda x, y: ((x - bx0) * sc + mg, (y - by0) * sc + mg)
-        # ТЕКСТУРА переда из макета, обрезанная по контуру (мм<->PT: mm = pt·fmm)
+        segs = []                                                    # отрезки в ПИКСЕЛЯХ (для интерактива)
+        for m in cfg.get("manual_arms", []):
+            pm = Point(m["f"][0] * fmm, m["f"][1] * fmm)             # подмышка в мм
+            P0 = ext.interpolate(ext.project(pm))                   # якорь на контуре
+            dy = float(m.get("hole_dy", 0.0))                       # применённый сдвиг отверстия (мм)
+            s0 = ext.project(Point(P0.x, P0.y + dy))
+            a = substring(ext, max(0.0, s0 - D), s0)
+            b = substring(ext, s0, min(L, s0 + D))
+            seg = a if a.centroid.y <= b.centroid.y else b          # вверх (меньший y)
+            segs.append([list(T(x, y)) for x, y in seg.coords])
+        # контур (упрощённый) в пикселях — для привязки перетаскивания к контуру
+        cont_px = [list(T(x, y)) for x, y in front.exterior.simplify(1.5).coords]
+        # ТЕКСТУРА переда из макета, обрезанная по контуру, + обводка (БЕЗ отрезков — их рисует клиент)
+        im = Image.new("RGB", (W, H), (255, 255, 255)); dr = ImageDraw.Draw(im)
         import io
         from export_pdf_grouped import _bg_fill_colors, _pix_png_nobg
         Z = fmm * sc
         clip = pymupdf.Rect(bx0 / fmm, by0 / fmm, bx1 / fmm, by1 / fmm)
         pix = page.get_pixmap(matrix=pymupdf.Matrix(Z, Z), clip=clip, alpha=True)
-        png = _pix_png_nobg(pix, _bg_fill_colors(page, cfg))         # убрать фон макета (как в финале)
+        png = _pix_png_nobg(pix, _bg_fill_colors(page, cfg))
         tex = Image.open(io.BytesIO(png)).convert("RGBA")
         mask = Image.new("L", tex.size, 0)
         ImageDraw.Draw(mask).polygon([((x - bx0) * sc, (y - by0) * sc) for x, y in ext.coords], fill=255)
-        tex.putalpha(Image.composite(tex.getchannel("A"), Image.new("L", tex.size, 0), mask))  # фон убран И клип по контуру
+        tex.putalpha(Image.composite(tex.getchannel("A"), Image.new("L", tex.size, 0), mask))
         im.paste(tex, (int(mg), int(mg)), tex)
         dr.polygon([T(x, y) for x, y in ext.coords], outline=(20, 24, 32), width=3)
-        cols = [(228, 0, 43), (21, 96, 255), (16, 160, 80), (245, 140, 0)]
-        try: fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
-        except Exception: fnt = ImageFont.load_default()
-        for i, coords in enumerate(segs):
-            col = cols[i % len(cols)]
-            dr.line([T(x, y) for x, y in coords], fill=col, width=9, joint="curve")
-            mx, my = T(*coords[len(coords) // 2])
-            txt = f"рука {i+1}: Ø{D:.0f}мм"
-            if mx > W * 0.5:                                          # у правого края — подпись влево (не обрезать)
-                dr.text((mx - 12, my), txt, fill=col, font=fnt, anchor="rm")
-            else:
-                dr.text((mx + 12, my), txt, fill=col, font=fnt, anchor="lm")
         fn = "front_preview.png"; im.save(os.path.join(d, fn))
-        return jsonify(img=f"/api/img/{data['sid']}/{fn}", arms=len(segs), hole_mm=D)
+        return jsonify(img=f"/api/img/{data['sid']}/{fn}", arms=len(segs), hole_mm=D,
+                       W=W, H=H, mm_per_px=1.0 / sc, seg_len_px=D * sc,
+                       contour=cont_px, segments=segs)
     except Exception as e:
         return jsonify(error=f"превью переда не удалось: {e}"), 400
 

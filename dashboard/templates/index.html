@@ -109,7 +109,13 @@
     <div id="frontPrevWrap">
       <h3>Перёд: где ляжет рука (по длине отверстия)</h3>
       <div id="frontPrevMsg" class="msg"></div>
-      <div id="frontPrevImg"></div>
+      <div class="canvaswrap" id="fpWrap" style="display:none"><canvas id="fpCanvas"></canvas></div>
+      <div id="fpBtns" style="display:none; margin-top:8px">
+        <button id="fpEdit">изменить</button>
+        <button id="fpApply" style="display:none">применить</button>
+        <button id="fpReset" class="back" style="display:none">сброс</button>
+        <p class="hint" id="fpHint" style="display:none">Тащите отрезок вверх/вниз по контуру — так двигается отверстие для руки. «Применить» сдвинет отверстие при сборке.</p>
+      </div>
     </div>
     <button id="btnBuild">Собрать раскладку</button>
     <div id="buildMsg" class="msg"></div>

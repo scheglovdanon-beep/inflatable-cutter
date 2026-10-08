@@ -173,10 +173,13 @@ $("#undo4").onclick=()=>{ const a=S.arms[S.cur];
   pick4.draw(); updPrompt4(); };
 function s4done(){ msg("#s4msg","",""); if(S.cur < S.n-1){ S.cur++; startHand(); } else goStep5(); }
 function goStep5(){ show(5); loadFrontPreview(); }
+const FP = { cv:$("#fpCanvas"), ctx:$("#fpCanvas").getContext("2d"), img:null, data:null,
+             scale:1, editing:false, drag:-1, cols:["#e4002b","#1560ff","#10a050","#f58c00"] };
 async function loadFrontPreview(){
   const w=$("#frontPrevWrap");
   if(S.n===0){ w.style.display="none"; return; }
-  w.style.display="block"; $("#frontPrevImg").innerHTML=""; msg("#frontPrevMsg","строю превью переда…","");
+  w.style.display="block"; $("#fpWrap").style.display="none"; $("#fpBtns").style.display="none";
+  msg("#frontPrevMsg","строю превью переда…","");
   try{
     const r=await fetch("/api/front_preview",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({sid:S.sid,size:S.size,arms_identical:S.ident,
@@ -184,9 +187,52 @@ async function loadFrontPreview(){
     const j=await r.json();
     if(!r.ok){ msg("#frontPrevMsg",j.error||"не удалось","err"); return; }
     msg("#frontPrevMsg",`цветом — где ляжет рука (${j.arms} шт., длина = Ø${j.hole_mm} мм отверстия)`,"ok");
-    $("#frontPrevImg").innerHTML=`<img src="${imgURL(j.img)}">`;
+    FP.data=j; FP.segs=j.segments.map(s=>s.slice());
+    FP.orig=j.segments.map((s,i)=>{ const a=fpAnchor(s); const hd=(S.arms[i]&&S.arms[i].holeDy)||0;
+      return [a[0], a[1]-hd/j.mm_per_px]; });        // дефолтный (несдвинутый) якорь для абсолютного сдвига
+    const im=new Image();
+    im.onload=()=>{ FP.img=im; FP.scale=Math.min(1,880/j.W);
+      FP.cv.width=Math.round(j.W*FP.scale); FP.cv.height=Math.round(j.H*FP.scale);
+      $("#fpWrap").style.display="block"; $("#fpBtns").style.display="block";
+      $("#fpApply").style.display="none"; $("#fpReset").style.display="none"; $("#fpHint").style.display="none";
+      FP.editing=false; fpDraw(); };
+    im.src=imgURL(j.img);
   }catch(e){ msg("#frontPrevMsg","ошибка превью переда","err"); }
 }
+function fpAnchor(seg){ return seg.reduce((a,p)=>p[1]>a[1]?p:a, seg[0]); }   // нижняя точка отрезка (= подмышка)
+function fpDraw(){ const c=FP.ctx, s=FP.scale; if(!FP.img) return;
+  c.clearRect(0,0,FP.cv.width,FP.cv.height); c.drawImage(FP.img,0,0,FP.cv.width,FP.cv.height);
+  FP.segs.forEach((seg,i)=>{ c.strokeStyle=FP.cols[i%4]; c.lineWidth=9; c.lineCap="round"; c.lineJoin="round";
+    c.beginPath(); seg.forEach((p,k)=>{ const x=p[0]*s,y=p[1]*s; k?c.lineTo(x,y):c.moveTo(x,y); }); c.stroke();
+    const a=fpAnchor(seg); c.fillStyle=FP.cols[i%4]; c.beginPath(); c.arc(a[0]*s,a[1]*s,7,0,7); c.fill();
+    c.fillStyle="#000"; c.font="bold 13px sans-serif"; c.fillText("рука "+(i+1), a[0]*s+10, a[1]*s-10); });
+}
+// построить отрезок по контуру от якоря вверх на длину seg_len_px
+function fpSegFromAnchor(ax,ay){ const C=FP.data.contour, n=C.length, Lp=FP.data.seg_len_px;
+  let bi=0,bd=1e18; C.forEach((p,i)=>{const dd=(p[0]-ax)**2+(p[1]-ay)**2; if(dd<bd){bd=dd;bi=i;}});
+  const up=(C[(bi+1)%n][1] < C[(bi-1+n)%n][1]) ? 1 : -1;      // направление к макушке (меньший y)
+  let pts=[C[bi].slice()], acc=0, i=bi;
+  while(acc<Lp){ const jn=(i+up+n)%n; acc+=Math.hypot(C[jn][0]-C[i][0],C[jn][1]-C[i][1]); pts.push(C[jn].slice()); i=jn; if(i===bi)break; }
+  return pts;
+}
+function fpXY(e){ const r=FP.cv.getBoundingClientRect();
+  return [ (e.clientX-r.left)*(FP.cv.width/r.width)/FP.scale, (e.clientY-r.top)*(FP.cv.height/r.height)/FP.scale ]; }
+FP.cv.addEventListener("pointerdown", e=>{ if(!FP.editing) return; const [x,y]=fpXY(e);
+  let bi=-1,bd=1e18; FP.segs.forEach((seg,i)=>{ const a=fpAnchor(seg); const dd=(a[0]-x)**2+(a[1]-y)**2; if(dd<bd){bd=dd;bi=i;} });
+  if(bi>=0 && bd < (40/FP.scale)**2){ FP.drag=bi; FP.cv.setPointerCapture(e.pointerId); } });
+FP.cv.addEventListener("pointermove", e=>{ if(FP.drag<0) return; const [x,y]=fpXY(e);
+  FP.segs[FP.drag]=fpSegFromAnchor(x,y); fpDraw(); });
+FP.cv.addEventListener("pointerup", ()=>{ FP.drag=-1; });
+$("#fpEdit").onclick=()=>{ FP.editing=true; $("#fpApply").style.display="inline-flex";
+  $("#fpReset").style.display="inline-flex"; $("#fpHint").style.display="block"; FP.cv.style.cursor="grab"; };
+$("#fpReset").onclick=()=>{ FP.segs=FP.data.segments.map(s=>s.slice()); S.arms.forEach(a=>a.holeDy=0); fpDraw(); };
+$("#fpApply").onclick=()=>{
+  FP.segs.forEach((seg,i)=>{ const dy=(fpAnchor(seg)[1]-FP.orig[i][1])*FP.data.mm_per_px;
+    if(S.arms[i]) S.arms[i].holeDy=dy; });
+  FP.editing=false; FP.cv.style.cursor="default"; $("#fpHint").style.display="none";
+  const ds=S.arms.map(a=>Math.round(a.holeDy||0));
+  msg("#frontPrevMsg",`сдвиг отверстия применён: ${ds.map((v,i)=>`рука ${i+1} ${v>0?"+":""}${v}мм`).join(", ")} — учтётся при сборке`,"ok");
+};
 $("#armNext4").onclick=()=>{ const a=S.arms[S.cur];
   if(a.wrist.length<2||a.elbow.length<2){ msg("#s4msg","нужны по 2 точки на запястье и локоть (или «пропустить»)","err"); return; }
   s4done(); };
@@ -220,7 +266,8 @@ async function poll(){
 // рука -> payload для бэкенда: f=подмышка, blade=хорда (если выбран верх плеча), tip досчитает сервер
 function armPayload(a){ const c0=cand(a.armpit); const o={f:[c0.x,c0.y]};
   if(a.shoulder!=null){ const c1=cand(a.shoulder); if(c1) o.blade=[[c0.x,c0.y],[c1.x,c1.y]]; }
-  if(a.wrist&&a.wrist.length===2) o.wrist=a.wrist; if(a.elbow&&a.elbow.length===2) o.elbow=a.elbow; return o; }
+  if(a.wrist&&a.wrist.length===2) o.wrist=a.wrist; if(a.elbow&&a.elbow.length===2) o.elbow=a.elbow;
+  if(a.holeDy) o.hole_dy=a.holeDy; return o; }
 function renderList(sel, slots, lab, filled){ const ol=$(sel); ol.innerHTML="";
   slots.forEach(s=>{ const li=document.createElement("li"); li.textContent=lab(s); li.dataset.slot=s;
     if(filled(s)) li.classList.add("filled"); ol.appendChild(li); }); }

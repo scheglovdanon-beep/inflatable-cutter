@@ -151,14 +151,14 @@ def build_layout(page, cfg):
                     if arm_pts is None:
                         arm_pts = np.asarray(res["hand"]["src_pts"], float)
             for ca in cut_arms:                                # ОТВЕРСТИЕ под КАЖДУЮ руку (на своей боковине)
-                place_armpit_hole(lay, g, contour_mm, ca["f"], fig, cfg)
+                place_armpit_hole(lay, g, contour_mm, ca["f"], fig, cfg, dy_mm=ca.get("hole_dy", 0.0))
         else:                                                  # отрезанная рука ОДНИМ куском (текстура)
             from arm import place_arm_piece
             for ca in cut_arms:
                 ap = place_arm_piece(lay, ca["poly_pt"], fig, cfg, page)
                 if arm_pts is None:
                     arm_pts = ap
-                place_armpit_hole(lay, g, contour_mm, ca["f"], fig, cfg)
+                place_armpit_hole(lay, g, contour_mm, ca["f"], fig, cfg, dy_mm=ca.get("hole_dy", 0.0))
 
     if cfg.get("make_spare_arm", True) and (lay.get("arm_pieces") or lay.get("hand_pieces")):
         from arm import add_spare_arm                             # запаска — если есть детали руки (любой путь)

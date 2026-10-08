@@ -294,10 +294,11 @@ def place_arm_hole_xy(layout, g, contour_mm, shoulder_xy, cfg):
                           "r": R, "piece": s["i"], "side": s.get("side", "left")}
 
 
-def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg):
+def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg, dy_mm=0.0):
     """Ø arm_hole_diameter_mm на боковине, ближайшей к точке подмышки armpit_pt (в PT).
     Пишет в СПИСОК arm_holes (не перезатирает при нескольких руках). Боковина — по индексу
-    сегмента гассета (seg['i']), как place_arm_hole."""
+    сегмента гассета (seg['i']), как place_arm_hole. dy_mm — ручной сдвиг центра отверстия
+    вверх(-)/вниз(+) вдоль полоски (из UI: перетаскивание отрезка)."""
     from shapely.geometry import Point
     f_mm = fig.s * PT2MM
     ax = armpit_pt[0] * f_mm; ay = armpit_pt[1] * f_mm              # подмышка в мм (как contour_mm)
@@ -317,9 +318,9 @@ def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg):
         flip = seg["yn0"] < seg["yn1"]                            # верх полоски -> к макушке фигуры
         a_top, a_bot = (seg["arc1"], seg["arc0"]) if flip else (seg["arc0"], seg["arc1"])
         y_arm = stop + (arc - a_top) / ((a_bot - a_top) or 1.0) * Ls   # подмышка на полоске
-        cy = min(max(y_arm - R, stop + m + R), sbot - m - R)      # низ круга на подмышке, в пределах полоски
+        cy = min(max(y_arm - R + dy_mm, stop + m + R), sbot - m - R)   # низ круга на подмышке (+ ручной сдвиг), в пределах полоски
     else:
-        cy = stop + m + R                                         # старое: у верха полоски
+        cy = min(max(stop + m + R + dy_mm, stop + m + R), sbot - m - R)   # у верха полоски + ручной сдвиг
     layout.setdefault("arm_holes", []).append(
         {"cx": (min(xs) + max(xs)) / 2.0, "cy": cy, "r": R, "piece": piece_i})
 

@@ -635,7 +635,8 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
             body_pt = body2
             exc = body_pt.exterior                                    # контур изменился после реза
             cut.append({"poly_pt": arm_poly, "f": f, "tip": tip,
-                        "wrist": m.get("wrist"), "elbow": m.get("elbow")})  # ручные срезы запястья/локтя (опц.)
+                        "wrist": m.get("wrist"), "elbow": m.get("elbow"),  # ручные срезы запястья/локтя (опц.)
+                        "hole_dy": m.get("hole_dy", 0.0)})                 # ручной сдвиг отверстия руки (мм)
         return body_pt, cut
     if cfg.get("arm_detect_v2"):                                      # v2: вертикальный рез у корня + валидация кистью
         arms2, body2 = detect_arms_v2(page, body_pt, cfg)
