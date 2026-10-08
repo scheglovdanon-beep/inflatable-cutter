@@ -218,19 +218,16 @@ function fpInitGeom(){ const C=FP.data.contour; FP.cum=[0];
   });
   fpRebuild();
 }
-function fpAt(t){ const C=FP.data.contour,cum=FP.cum; t=Math.max(0,Math.min(FP.total,t));
-  let i=1; while(i<cum.length && cum[i]<t) i++; const i0=i-1,i1=Math.min(i,C.length-1);
+function fpAt(t){ const C=FP.data.contour,cum=FP.cum; t=((t%FP.total)+FP.total)%FP.total;   // заворот (кольцо)
+  let i=1; while(i<cum.length && cum[i]<t) i++; const i0=Math.max(0,i-1),i1=Math.min(i,C.length-1);
   const sl=(cum[i1]-cum[i0])||1, f=(t-cum[i0])/sl;
   return [C[i0][0]+(C[i1][0]-C[i0][0])*f, C[i0][1]+(C[i1][1]-C[i0][1])*f]; }
 function fpProj(x,y){ const C=FP.data.contour,cum=FP.cum; let bt=0,bd=1e18;  // проекция точки на контур -> дуга
   for(let i=0;i<C.length-1;i++){ const ax=C[i][0],ay=C[i][1],dx=C[i+1][0]-ax,dy=C[i+1][1]-ay,L2=(dx*dx+dy*dy)||1;
     let u=((x-ax)*dx+(y-ay)*dy)/L2; u=Math.max(0,Math.min(1,u)); const px=ax+dx*u,py=ay+dy*u,dd=(px-x)**2+(py-y)**2;
     if(dd<bd){bd=dd; bt=cum[i]+Math.sqrt(L2)*u;} } return bt; }
-function fpSub(s0,dir){ const C=FP.data.contour,cum=FP.cum;         // отрезок ФИКС. длины Lp по дуге от s0
-  const s1=Math.max(0,Math.min(FP.total, s0+dir*FP.Lp));
-  const lo=Math.min(s0,s1), hi=Math.max(s0,s1); const pts=[fpAt(lo)];
-  for(let i=0;i<C.length;i++){ if(cum[i]>lo+0.5 && cum[i]<hi-0.5) pts.push(C[i].slice()); }
-  pts.push(fpAt(hi)); return pts; }
+function fpSub(s0,dir){ const N=Math.max(8, Math.ceil(FP.Lp/6)); const pts=[];  // ФИКС. длина Lp, равномерная выборка (гладко, с заворотом)
+  for(let k=0;k<=N;k++) pts.push(fpAt(s0 + dir*FP.Lp*k/N)); return pts; }
 function fpRebuild(){ FP.segs=FP.s0.map((s0,i)=>fpSub(s0,FP.dir[i])); fpDraw(); }
 function fpDraw(){ const c=FP.ctx, s=FP.scale; if(!FP.img) return;
   c.clearRect(0,0,FP.cv.width,FP.cv.height); c.drawImage(FP.img,0,0,FP.cv.width,FP.cv.height);
@@ -248,8 +245,8 @@ FP.cv.addEventListener("pointerdown", e=>{ if(!FP.editing) return; const [x,y]=f
   let bi=-1,bd=1e18; FP.segs.forEach((seg,i)=>{ const dd=fpDistToSeg(x,y,seg); if(dd<bd){bd=dd;bi=i;} });
   if(bi>=0 && bd < 26/FP.scale){ FP.drag=bi; FP.grabArc=fpProj(x,y); FP.grabS0=FP.s0[bi]; FP.cv.setPointerCapture(e.pointerId); } });
 FP.cv.addEventListener("pointermove", e=>{ if(FP.drag<0) return; const [x,y]=fpXY(e);
-  let s0=FP.grabS0+(fpProj(x,y)-FP.grabArc);
-  s0=Math.max(FP.Lp, Math.min(FP.total-FP.Lp, s0));            // не уезжать за край контура
+  let d=fpProj(x,y)-FP.grabArc; d=((d%FP.total)+FP.total)%FP.total; if(d>FP.total/2) d-=FP.total;  // кратчайший сдвиг по кольцу
+  const s0=FP.grabS0+d;
   FP.s0[FP.drag]=s0; FP.segs[FP.drag]=fpSub(s0,FP.dir[FP.drag]); fpDraw(); });
 FP.cv.addEventListener("pointerup", ()=>{ FP.drag=-1; });
 FP.cv.addEventListener("pointercancel", ()=>{ FP.drag=-1; });
@@ -324,8 +321,9 @@ function makeZoomable(container, url){
   let fit=1, scale=1, tx=0, ty=0, natW=0, natH=0;
   const apply=()=>{ img.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`; };
   function center(){ const r=vp.getBoundingClientRect();
-    fit=(r.width/natW)||1; scale=fit;                               // 100% ширины окна (нельзя отдалить ниже)
-    tx=0; ty=Math.min(0,(r.height-natH*fit)/2); apply(); }
+    if(!r.width || !natW){ requestAnimationFrame(center); return; }  // окно ещё не разложено — подождать
+    fit=Math.min(r.width/natW, r.height/natH); scale=fit;           // ВПИСАТЬ фигуру в окно 1:1 (вся видна, по максимуму)
+    tx=(r.width-natW*fit)/2; ty=(r.height-natH*fit)/2; apply(); }
   function zoomAt(cx,cy,f){ const r=vp.getBoundingClientRect(); const x=cx-r.left, y=cy-r.top;
     const ns=Math.min(fit*3, Math.max(fit, scale*f));               // приближение максимум 3×, отдалить не ниже 100%
     tx=x-(x-tx)*(ns/scale); ty=y-(y-ty)*(ns/scale); scale=ns; apply(); }
