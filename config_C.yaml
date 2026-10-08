@@ -1,6 +1,6 @@
 # C — ОХОТНИКИ Hatfield McCoy (один человек, 2 руки наружу)
 target_height_mm: 2700
-front_smooth_mm: 120
+front_smooth_mm: 70
 expected_arms: 2
 
 seam_allowance_mm: 10

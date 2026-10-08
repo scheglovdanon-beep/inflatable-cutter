@@ -338,7 +338,7 @@ def smooth_front(contour_mm, cfg):
     между выступами плавной внешней дугой; closing расширяющая, поэтому ВЕСЬ исходный контур
     (и весь макет) гарантированно остаётся внутри. Крупные вогнутости (> ~2r, талия и т.п.)
     и выпуклости сохраняются как обычная обводка. 0 = без сглаживания."""
-    r = cfg.get("front_smooth_mm", 0)
+    r = cfg.get("front_smooth_mm", 70)
     if not r or r <= 0:
         return contour_mm
     p = contour_mm.buffer(r, join_style=1).buffer(-r, join_style=1)   # closing (round): впадины -> плавная дуга

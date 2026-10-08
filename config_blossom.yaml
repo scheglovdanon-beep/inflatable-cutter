@@ -39,7 +39,7 @@ expected_arms: 1
 fan_diameter_mm: 460
 figure_side: left
 front_all_details: true
-front_smooth_mm: 140
+front_smooth_mm: 70
 instruction_font_mm: 6
 instruction_width_mm: 300
 leg_height_mm: 150

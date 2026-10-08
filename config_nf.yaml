@@ -1,5 +1,5 @@
 target_height_mm: 2700
-front_smooth_mm: 140
+front_smooth_mm: 70
 expected_arms: 1
 seam_allowance_mm: 10
 line_width_mm: 0.2

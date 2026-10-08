@@ -1,6 +1,6 @@
 # D — MAY CHIROPRACTIC (позвоночник), 1 рука (фона нет)
 target_height_mm: 1900
-front_smooth_mm: 140
+front_smooth_mm: 70
 expected_arms: 1
 
 seam_allowance_mm: 10

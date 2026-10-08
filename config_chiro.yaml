@@ -34,7 +34,7 @@ bottom_detect_frac: 0.03
 figure_side: left
 smooth_tol_mm: 1.0
 make_appendages: true
-front_smooth_mm: 140
+front_smooth_mm: 70
 arm_from_contour: false
 make_hand: true
 make_spare_arm: true
