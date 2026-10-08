@@ -285,7 +285,13 @@ let qTimer=null;
 function startQueue(){ if(!qTimer){ pollQueue(); qTimer=setInterval(pollQueue, 2500); } }
 function esc(s){ return (s||"").replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 function fmtT(s){ s=Math.max(0,Math.round(s||0)); const m=Math.floor(s/60), ss=s%60; return m? `${m} мин ${ss} с` : `${ss} с`; }
-async function pollQueue(){ try{ const r=await fetch("/api/queue"); const j=await r.json(); renderQueue(j.jobs||[]); }catch(e){} }
+let qDonePrev=-1;
+async function pollQueue(){ try{ const r=await fetch("/api/queue"); const j=await r.json(); const jobs=j.jobs||[];
+  renderQueue(jobs);
+  const done=jobs.filter(x=>x.status==="done").length;
+  if(qDonePrev>=0 && done>qDonePrev) loadGallery(false);   // новая готова -> обновить галерею на главном
+  qDonePrev=done;
+}catch(e){} }
 function renderQueue(jobs){
   const sec=$("#queueSec"), list=$("#queueList");
   if(!jobs.length){ sec.style.display="none"; return; }
@@ -313,21 +319,25 @@ function renderQueue(jobs){
 }
 $("#qClear").onclick=async()=>{ await fetch("/api/queue/clear_done",{method:"POST"}); pollQueue(); };
 
-// ---------- Галерея готовых раскладок ----------
-$("#btnGallery").onclick=async()=>{ const w=$("#galWrap");
-  if(w.style.display==="none"){ w.style.display="block"; $("#libWrap").style.display="none"; await loadGallery(); } else w.style.display="none"; };
-async function loadGallery(){
-  const g=$("#galGrid"); g.innerHTML="<p class='hint'>загрузка…</p>";
-  try{ const r=await fetch("/api/builds"); const j=await r.json(); g.innerHTML="";
-    if(!j.items||!j.items.length){ g.innerHTML="<p class='hint'>пока нет готовых раскладок — соберите первую.</p>"; return; }
-    j.items.forEach(it=>{ const c=document.createElement("div"); c.className="libcard";
-      c.innerHTML=`<img src="${imgURL(it.thumb)}" loading="lazy"><div class="nm">${esc(it.name)}</div>`+
-        `<div class="badge">${it.size} мм · ${it.n_arms} ${it.n_arms==1?"рука":"руки"}</div>`+
-        `<div class="dls">${it.pdf?`<a class="pdf" href="${imgURL(it.pdf)}" download>PDF</a>`:""}${it.svg?`<a href="${imgURL(it.svg)}" download>SVG</a>`:""}</div>`;
-      g.appendChild(c); });
-  }catch(e){ g.innerHTML="<p class='msg err'>не удалось загрузить галерею</p>"; }
+// ---------- Галерея готовых раскладок (скачать PDF/SVG прямо с главного меню) ----------
+function renderGallery(items){
+  const g=$("#galGrid"); g.innerHTML="";
+  items.forEach(it=>{ const c=document.createElement("div"); c.className="libcard";
+    c.innerHTML=`<img src="${imgURL(it.thumb)}" loading="lazy"><div class="nm">${esc(it.name)}</div>`+
+      `<div class="badge">${it.size} мм · ${it.n_arms} ${it.n_arms==1?"рука":"руки"}</div>`+
+      `<div class="dls">${it.pdf?`<a class="pdf" href="${imgURL(it.pdf)}" download>⬇ PDF</a>`:""}${it.svg?`<a href="${imgURL(it.svg)}" download>⬇ SVG</a>`:""}</div>`;
+    g.appendChild(c); });
 }
-startQueue();   // показать очередь, если сборки уже идут
+$("#btnGallery").onclick=async()=>{ const w=$("#galWrap");
+  if(w.style.display==="none"){ w.style.display="block"; $("#libWrap").style.display="none"; await loadGallery(true); } else w.style.display="none"; };
+async function loadGallery(showEmpty){
+  try{ const r=await fetch("/api/builds"); const j=await r.json(); const items=j.items||[];
+    if(!items.length){ if(showEmpty){ $("#galWrap").style.display="block"; $("#galGrid").innerHTML="<p class='hint'>пока нет готовых раскладок — соберите первую.</p>"; } return; }
+    $("#galWrap").style.display="block"; renderGallery(items);
+  }catch(e){ if(showEmpty) $("#galGrid").innerHTML="<p class='msg err'>не удалось загрузить галерею</p>"; }
+}
+startQueue();         // показать очередь, если сборки уже идут
+loadGallery(false);   // авто-показ готовых раскладок на главном меню (если есть)
 
 // ---------- утилиты ----------
 // рука -> payload для бэкенда: f=подмышка, blade=хорда (если выбран верх плеча), tip досчитает сервер
