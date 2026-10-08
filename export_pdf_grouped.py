@@ -605,7 +605,10 @@ def main():
     fr_bbox = fig.contour_pt.bounds                                   # bbox КОНТУРА (покрывает всю панель, без зазоров)
     lay["_tiles"] = {}                                                 # tilename -> seam-полигон (для _poly_for/_bbox_for)
     _split = cfg.get("print_split", True)
-    holst = cfg.get("print_split_width_mm", cfg.get("roll_width_mm", 1440))
+    # порог реза = ПОЛЕЗНАЯ ширина холста: вычитаем припуск (2·seam на деталь) + зазор нестинга
+    # (rgap=2·seam+20, буфер gap/2 с каждой стороны), иначе панель чуть у́же 1440 не влезает в рулон
+    # повёрнутой (с припуском+зазором >1440) -> ложится НЕповёрнутой и торчит (видна только голова).
+    holst = cfg.get("print_split_width_mm") or (cfg.get("roll_width_mm", 1440) - 4 * seam_mm_v - 20)
     tgap = max(2 * seam_mm_v + 20, 40)                                 # зазор между соседними деталями-полосами
 
     def _clip_arcs_x(arcs, x0, x1):
