@@ -97,6 +97,16 @@ button.back:hover{background:#e6eaf1; transform:translateY(-1px)}
 
 .nav{margin-top:22px; padding-top:18px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; gap:4px}
 
+/* состояние «кнопка нажата / идёт загрузка» */
+@keyframes spin{to{transform:rotate(360deg)}}
+button.busy{background:linear-gradient(135deg,#8b93b8,#6f78a3)!important; color:#fff!important; cursor:progress; box-shadow:none!important}
+button.busy::after{content:""; width:16px; height:16px; margin-left:4px; border:2.5px solid rgba(255,255,255,.45);
+  border-top-color:#fff; border-radius:50%; display:inline-block; animation:spin .7s linear infinite; vertical-align:-3px}
+button:disabled{opacity:.95}
+.msg.spin::before{content:""; display:inline-block; width:15px; height:15px; margin-right:9px;
+  border:2.5px solid rgba(99,102,241,.25); border-top-color:var(--brand); border-radius:50%;
+  animation:spin .7s linear infinite; vertical-align:-3px}
+
 /* ---------- Text helpers ---------- */
 .hint{color:var(--muted); font-size:13.5px; line-height:1.5}
 .prompt{font-weight:700; color:var(--brand-2); min-height:22px; margin:12px 0 4px}

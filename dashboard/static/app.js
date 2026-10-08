@@ -60,20 +60,21 @@ class Picker {
 // ---------- ШАГ 1: загрузка ----------
 $("#btnUpload").onclick = async () => {
   const f=$("#pdf").files[0];
-  if(!f){ $("#upMsg").textContent="выберите PDF"; $("#upMsg").className="msg err"; return; }
-  $("#upMsg").textContent="загрузка…"; $("#upMsg").className="msg";
-  const fd=new FormData(); fd.append("pdf", f);
-  const r=await fetch("/api/upload",{method:"POST",body:fd}); const j=await r.json();
-  if(!r.ok){ $("#upMsg").textContent=j.error||"ошибка"; $("#upMsg").className="msg err"; return; }
-  S.sid=j.sid; S.meta=j;
-  $("#upMsg").textContent="макет загружен ✓"; $("#upMsg").className="msg ok";
-  show(2);
+  if(!f){ msg("#upMsg","выберите PDF","err"); return; }
+  busy($("#btnUpload"),true,"загрузка"); msg("#upMsg","загрузка макета…","spin");
+  try{
+    const fd=new FormData(); fd.append("pdf", f);
+    const r=await fetch("/api/upload",{method:"POST",body:fd}); const j=await r.json();
+    if(!r.ok){ msg("#upMsg",j.error||"ошибка","err"); return; }
+    S.sid=j.sid; S.meta=j; msg("#upMsg","макет загружен ✓","ok"); show(2);
+  }catch(e){ msg("#upMsg","ошибка загрузки","err"); }
+  finally{ busy($("#btnUpload"),false); }
 };
 
 // ---------- ШАГ 2: параметры ----------
 $("#narms").onchange = () => { $("#identWrap").style.display = $("#narms").value==="2" ? "inline-block":"none"; };
-async function enterStep3(){                    // детект кандидатов + шаг 3 (вход и «переделать рез руки»)
-  show(3); S.cur=0; msg("#s3msg","ищу кандидатные точки…","");
+async function enterStep3(btn){                 // детект кандидатов + шаг 3 (вход и «переделать рез руки»)
+  show(3); S.cur=0; msg("#s3msg","ищу кандидатные точки на макете…","spin");
   try {
     const r=await fetch("/api/candidates",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({sid:S.sid,size:S.size})});
@@ -81,6 +82,7 @@ async function enterStep3(){                    // детект кандидат
     if(S.cands.length){ msg("#s3msg",`найдено ${S.cands.length} точек. Выберите подмышку (и верх плеча для хорды).`,"ok"); }
     else { msg("#s3msg","кандидаты не найдены — попробуйте другой размер/макет.","err"); }
   } catch(e){ msg("#s3msg","не удалось получить кандидатов.","err"); S.cands=[]; }
+  finally{ busy(btn,false); }
   startCut();
 }
 $("#toS3").onclick = () => {
@@ -88,7 +90,7 @@ $("#toS3").onclick = () => {
   S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
   S.cands=null;
   if(S.n===0){ goStep5(); return; }
-  enterStep3();
+  busy($("#toS3"),true,"определяю"); enterStep3($("#toS3"));
 };
 document.querySelectorAll(".back").forEach(b=> b.onclick=()=>show(parseInt(b.dataset.to)));
 
@@ -134,12 +136,15 @@ $("#armNext").onclick=async()=>{ const a=S.arms[S.cur];
   if(a.armpit==null){ msg("#s3msg","выберите № точки подмышки","err"); return; }
   msg("#s3msg","","");
   if(S.cur < S.n-1){ S.cur++; startCut(); return; }
-  msg("#s3msg","проверяю рез…","");
-  const r=await fetch("/api/arm_preview",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({sid:S.sid,size:S.size,arms:S.arms.map(armPayload)})});
-  const j=await r.json();
-  if(!r.ok){ msg("#s3msg",j.error,"err"); return; }
-  S.armCrops=j.arms; S.cur=0; startHand();
+  busy($("#armNext"),true,"проверяю рез"); msg("#s3msg","проверяю рез и готовлю руку…","spin");
+  try{
+    const r=await fetch("/api/arm_preview",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({sid:S.sid,size:S.size,arms:S.arms.map(armPayload)})});
+    const j=await r.json();
+    if(!r.ok){ msg("#s3msg",j.error,"err"); return; }
+    msg("#s3msg","","");  S.armCrops=j.arms; S.cur=0; startHand();
+  }catch(e){ msg("#s3msg","ошибка подготовки руки","err"); }
+  finally{ busy($("#armNext"),false); }
 };
 
 // ---------- ШАГ 4: запястье/локоть ----------
@@ -179,7 +184,7 @@ async function loadFrontPreview(){
   const w=$("#frontPrevWrap");
   if(S.n===0){ w.style.display="none"; return; }
   w.style.display="block"; $("#fpWrap").style.display="none"; $("#fpBtns").style.display="none";
-  msg("#frontPrevMsg","строю превью переда…","");
+  msg("#frontPrevMsg","строю превью переда (где ляжет рука)…","spin");
   try{
     const r=await fetch("/api/front_preview",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({sid:S.sid,size:S.size,arms_identical:S.ident,
@@ -259,30 +264,35 @@ $("#fpApply").onclick=()=>{
 };
 $("#armNext4").onclick=()=>{ const a=S.arms[S.cur];
   if(a.wrist.length<2||a.elbow.length<2){ msg("#s4msg","нужны по 2 точки на запястье и локоть (или «пропустить»)","err"); return; }
-  s4done(); };
-$("#skip4").onclick=()=>{ const a=S.arms[S.cur]; a.wrist=[]; a.elbow=[]; s4done(); };   // авто-детект запястья/локтя
+  busy($("#armNext4"),true,"готовлю"); s4done(); busy($("#armNext4"),false); };
+$("#skip4").onclick=()=>{ const a=S.arms[S.cur]; a.wrist=[]; a.elbow=[];   // авто-детект запястья/локтя
+  busy($("#skip4"),true,"готовлю"); s4done(); busy($("#skip4"),false); };
 
 // ---------- ШАГ 5: сборка ----------
 $("#btnBuild").onclick=async()=>{
   $("#dl").style.display="none"; $("#previewWrap").innerHTML="";
-  msg("#buildMsg","запускаю сборку (2–5 мин)…","");
-  const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,
-    spare:$("#spare").checked, back_copy:$("#backCopy").checked,
-    arms:S.arms.map(armPayload)};
-  const r=await fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); return; }
-  poll();
+  busy($("#btnBuild"),true,"собираю"); msg("#buildMsg","запускаю сборку (2–5 мин)…","spin");
+  try{
+    const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,
+      spare:$("#spare").checked, back_copy:$("#backCopy").checked,
+      arms:S.arms.map(armPayload)};
+    const r=await fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); busy($("#btnBuild"),false); return; }
+    poll();
+  }catch(e){ msg("#buildMsg","ошибка запуска сборки","err"); busy($("#btnBuild"),false); }
 };
 async function poll(){
   const r=await fetch("/api/status/"+S.sid); const j=await r.json();
-  msg("#buildMsg", j.msg || j.status, j.status==="error"?"err":"");
+  const done=(j.status==="done"||j.status==="error");
+  msg("#buildMsg", j.msg || j.status, j.status==="error"?"err":(done?"ok":"spin"));
   if(j.status==="done"){
+    busy($("#btnBuild"),false);
     $("#dl").style.display="block";
     $("#dlPdf").href=imgURL(j.pdf); $("#dlSvg").style.display = j.svg?"inline-block":"none"; if(j.svg) $("#dlSvg").href=imgURL(j.svg);
     if(j.png) makeZoomable($("#previewWrap"), imgURL(j.png));
     return;
   }
-  if(j.status==="error") return;
+  if(j.status==="error"){ busy($("#btnBuild"),false); return; }
   setTimeout(poll, 3000);
 }
 
@@ -299,6 +309,10 @@ function markActive(sel, slots, filled, next){ $(sel).querySelectorAll("li").for
     li.classList.toggle("filled", filled(li.dataset.slot));
     li.classList.toggle("active", li.dataset.slot===next); }); }
 function msg(sel,t,cls){ const e=$(sel); e.textContent=t; e.className="msg "+(cls||""); }
+// кнопка: показать «нажата/загрузка» (другой цвет + спиннер) и заблокировать
+function busy(btn,on,label){ if(!btn) return;
+  if(on){ if(btn.dataset.t===undefined) btn.dataset.t=btn.textContent; btn.classList.add("busy"); btn.disabled=true; if(label) btn.textContent=label; }
+  else { btn.classList.remove("busy"); btn.disabled=false; if(btn.dataset.t!==undefined){ btn.textContent=btn.dataset.t; delete btn.dataset.t; } } }
 
 // ---------- Зумируемое превью раскладки ----------
 function makeZoomable(container, url){
@@ -352,7 +366,7 @@ async function loadLib(){
   }catch(e){ g.innerHTML="<p class='msg err'>не удалось загрузить базу</p>"; }
 }
 async function useLib(id){
-  msg("#upMsg","открываю макет из базы…","");
+  msg("#upMsg","открываю макет из базы…","spin");
   try{ const r=await fetch("/api/library/use",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});
     const j=await r.json(); if(!r.ok){ msg("#upMsg",j.error||"ошибка","err"); return; }
     S.sid=j.sid; S.meta=j; msg("#upMsg","макет «"+(j.name||"")+"» загружен ✓","ok");
@@ -363,13 +377,14 @@ async function useLib(id){
 // ---------- Редактирование собранного макета ----------
 $("#editArm").onclick = () => {                 // заново задетектить/переназначить рез руки
   S.arms.forEach(a=>{ a.armpit=null; a.shoulder=null; });
-  enterStep3();
+  busy($("#editArm"),true,"открываю"); enterStep3($("#editArm"));
 };
 $("#editHand").onclick = async () => {          // заново задетектить кисть/предплечье (переразметка)
-  S.cur=0; msg("#buildMsg","готовлю руку для переразметки…","");
+  S.cur=0; busy($("#editHand"),true,"готовлю"); msg("#buildMsg","готовлю руку для переразметки…","spin");
   try{ const r=await fetch("/api/arm_preview",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({sid:S.sid,size:S.size,arms:S.arms.map(armPayload)})});
     const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error,"err"); return; }
     S.armCrops=j.arms; S.arms.forEach(a=>{ a.wrist=[]; a.elbow=[]; }); msg("#buildMsg","",""); startHand();
   }catch(e){ msg("#buildMsg","ошибка подготовки руки","err"); }
+  finally{ busy($("#editHand"),false); }
 };
