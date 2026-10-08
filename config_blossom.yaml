@@ -74,7 +74,6 @@ neck_min_drop: 0.12
 neck_search_top_frac: 0.5
 neck_smooth_mm: 40
 notch_interval_mm: 200
-outline_dark_thr: 110
 print_arrange: false
 print_split: false
 protrusion_min_area_mm2: 150

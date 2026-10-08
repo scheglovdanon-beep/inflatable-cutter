@@ -358,13 +358,23 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
         n = n / nn
         if not contour_mm.contains(Point(p + n * 2.0)):             # внутрь силуэта
             n = -n
+        look = cfg.get("outline_fill_lookahead_mm", 16.0)           # заглянуть глубже на столько мм
+        jump = cfg.get("outline_fill_min_jump", 120)                # «намного ярче» = скачок суммы RGB
+        dark_fill = cfg.get("outline_fill_dark_max", 150)           # кромка считается «тёмной» (возможно цветная обводка)
         d, last = 1.0, None                                        # УНИВЕРСАЛЬНО: цвет ПРЯМО У КРОМКИ (первая
         while d <= skip_max:                                        # стабильная заливка после обводки) — верно для
             c = px_mm(*(p + n * d))                                 # тонких краевых цветов (зубцы/диски), не уходит в тело
             if not is_dark(c):                                     # near-чёрное = контур, пропускаем
                 c2 = px_mm(*(p + n * (d + stab)))                 # стабильность: соседний пиксель тоже не тёмный
                 if not is_dark(c2):                               # (тонкий блик/антиалиас в 1px не победит)
-                    return tuple(int(v) // 4 * 4 for v in c2), True
+                    base = c2
+                    s2 = int(c2[0]) + int(c2[1]) + int(c2[2])
+                    if s2 < dark_fill:                            # кромка ТЁМНАЯ (цветная обводка ИЛИ реально тёмный цвет)
+                        deep = px_mm(*(p + n * min(skip_max, d + look)))   # что ГЛУБЖЕ за ней
+                        sd = int(deep[0]) + int(deep[1]) + int(deep[2])
+                        if sd > s2 + jump and not is_dark(deep):  # глубже ЗАМЕТНО ярче -> кромка была обводкой, берём заливку
+                            base = deep                           # (если глубже так же темно -> это реальный цвет, оставляем c2)
+                    return tuple(int(v) // 4 * 4 for v in base), True
             last = c; d += step_mm
         return (tuple(int(v) for v in last) if last is not None else fallback), False
 
