@@ -26,7 +26,9 @@ from flask import Flask, request, jsonify, send_file, render_template, abort
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))      # /opt/inflatable-cutter
 SESS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
+LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "library")   # база прогнанных макетов
 os.makedirs(SESS, exist_ok=True)
+os.makedirs(LIB, exist_ok=True)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
@@ -120,6 +122,18 @@ def _build_cfg(size, n_arms, arms_identical, arms):
         man.append(m)
     cfg["manual_arms"] = man
     return cfg
+
+
+def _save_library(sid, pdf_path, page_png, name):
+    """Сохранить макет в БАЗУ (персистентно): PDF + превью-миниатюра + имя. id = sid."""
+    try:
+        from PIL import Image
+        ld = os.path.join(LIB, sid); os.makedirs(ld, exist_ok=True)
+        shutil.copy2(pdf_path, os.path.join(ld, "macet.pdf"))
+        im = Image.open(page_png); im.thumbnail((360, 360)); im.save(os.path.join(ld, "thumb.png"))
+        json.dump({"sid": sid, "name": name}, open(os.path.join(ld, "meta.json"), "w"))
+    except Exception:
+        pass
 
 
 def _render_page_png(pdf_path, out_png, max_px=1600):
@@ -239,6 +253,52 @@ def upload():
         return jsonify(error=f"не удалось прочитать PDF: {e}"), 400
     meta["sid"] = sid
     meta["img"] = f"/api/img/{sid}/page.png"
+    meta["name"] = f.filename
+    json.dump(meta, open(os.path.join(d, "meta.json"), "w"))
+    _save_library(sid, pdf_path, os.path.join(d, "page.png"), f.filename)   # в базу макетов
+    return jsonify(**meta)
+
+
+@app.route("/api/library")
+def library():
+    """Список макетов базы (прогнанных через инструмент): id, имя, миниатюра."""
+    items = []
+    for sid in os.listdir(LIB):
+        md = os.path.join(LIB, sid, "meta.json")
+        if not os.path.isfile(md):
+            continue
+        try:
+            m = json.load(open(md))
+            items.append({"id": sid, "name": m.get("name", sid),
+                          "thumb": f"/api/libimg/{sid}", "t": os.path.getmtime(md)})
+        except Exception:
+            continue
+    items.sort(key=lambda x: -x["t"])
+    return jsonify(items=items)
+
+
+@app.route("/api/libimg/<sid>")
+def libimg(sid):
+    p = os.path.join(LIB, os.path.basename(sid), "thumb.png")
+    if not os.path.isfile(p):
+        abort(404)
+    return send_file(p)
+
+
+@app.route("/api/library/use", methods=["POST"])
+def library_use():
+    """Открыть макет из базы: создать НОВУЮ сессию из его PDF -> вернуть как upload."""
+    data = request.get_json(force=True)
+    lid = os.path.basename(data.get("id", ""))
+    src = os.path.join(LIB, lid, "macet.pdf")
+    if not os.path.isfile(src):
+        return jsonify(error="макет не найден в базе"), 404
+    name = json.load(open(os.path.join(LIB, lid, "meta.json"))).get("name", lid) if os.path.isfile(os.path.join(LIB, lid, "meta.json")) else lid
+    sid = uuid.uuid4().hex[:12]
+    d = os.path.join(SESS, sid); os.makedirs(d, exist_ok=True)
+    pdf_path = os.path.join(d, "macet.pdf"); shutil.copy2(src, pdf_path)
+    meta = _render_page_png(pdf_path, os.path.join(d, "page.png"))
+    meta["sid"] = sid; meta["img"] = f"/api/img/{sid}/page.png"; meta["name"] = name
     json.dump(meta, open(os.path.join(d, "meta.json"), "w"))
     return jsonify(**meta)
 

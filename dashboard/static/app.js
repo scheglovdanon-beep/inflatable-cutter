@@ -72,21 +72,23 @@ $("#btnUpload").onclick = async () => {
 
 // ---------- ШАГ 2: параметры ----------
 $("#narms").onchange = () => { $("#identWrap").style.display = $("#narms").value==="2" ? "inline-block":"none"; };
-$("#toS3").onclick = async () => {
-  S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked;
-  S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
-  S.cur=0; S.cands=null;
-  if(S.n===0){ show(5); return; }
-  show(3); msg("#s3msg","ищу кандидатные точки…","");
+async function enterStep3(){                    // детект кандидатов + шаг 3 (вход и «переделать рез руки»)
+  show(3); S.cur=0; msg("#s3msg","ищу кандидатные точки…","");
   try {
     const r=await fetch("/api/candidates",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({sid:S.sid,size:S.size})});
-    const j=await r.json();
-    S.cands = j.pts || [];
+    const j=await r.json(); S.cands = j.pts || [];
     if(S.cands.length){ msg("#s3msg",`найдено ${S.cands.length} точек. Выберите подмышку (и верх плеча для хорды).`,"ok"); }
     else { msg("#s3msg","кандидаты не найдены — попробуйте другой размер/макет.","err"); }
   } catch(e){ msg("#s3msg","не удалось получить кандидатов.","err"); S.cands=[]; }
   startCut();
+}
+$("#toS3").onclick = () => {
+  S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked;
+  S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
+  S.cands=null;
+  if(S.n===0){ show(5); return; }
+  enterStep3();
 };
 document.querySelectorAll(".back").forEach(b=> b.onclick=()=>show(parseInt(b.dataset.to)));
 
@@ -210,3 +212,42 @@ function markActive(sel, slots, filled, next){ $(sel).querySelectorAll("li").for
     li.classList.toggle("filled", filled(li.dataset.slot));
     li.classList.toggle("active", li.dataset.slot===next); }); }
 function msg(sel,t,cls){ const e=$(sel); e.textContent=t; e.className="msg "+(cls||""); }
+
+// ---------- База макетов ----------
+$("#btnLib").onclick = async () => {
+  const w=$("#libWrap");
+  if(w.style.display==="none"){ w.style.display="block"; await loadLib(); } else { w.style.display="none"; }
+};
+async function loadLib(){
+  const g=$("#libGrid"); g.innerHTML="<p class='hint'>загрузка…</p>";
+  try{ const r=await fetch("/api/library"); const j=await r.json();
+    g.innerHTML="";
+    if(!j.items||!j.items.length){ g.innerHTML="<p class='hint'>база пуста — загрузите первый макет.</p>"; return; }
+    j.items.forEach(it=>{ const c=document.createElement("div"); c.className="libcard";
+      const im=document.createElement("img"); im.src=imgURL(it.thumb); im.loading="lazy";
+      const nm=document.createElement("div"); nm.className="nm"; nm.textContent=it.name;
+      c.appendChild(im); c.appendChild(nm); c.onclick=()=>useLib(it.id); g.appendChild(c); });
+  }catch(e){ g.innerHTML="<p class='msg err'>не удалось загрузить базу</p>"; }
+}
+async function useLib(id){
+  msg("#upMsg","открываю макет из базы…","");
+  try{ const r=await fetch("/api/library/use",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});
+    const j=await r.json(); if(!r.ok){ msg("#upMsg",j.error||"ошибка","err"); return; }
+    S.sid=j.sid; S.meta=j; msg("#upMsg","макет «"+(j.name||"")+"» загружен ✓","ok");
+    $("#libWrap").style.display="none"; show(2);
+  }catch(e){ msg("#upMsg","ошибка открытия макета","err"); }
+}
+
+// ---------- Редактирование собранного макета ----------
+$("#editArm").onclick = () => {                 // заново задетектить/переназначить рез руки
+  S.arms.forEach(a=>{ a.armpit=null; a.shoulder=null; });
+  enterStep3();
+};
+$("#editHand").onclick = async () => {          // заново задетектить кисть/предплечье (переразметка)
+  S.cur=0; msg("#buildMsg","готовлю руку для переразметки…","");
+  try{ const r=await fetch("/api/arm_preview",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({sid:S.sid,size:S.size,arms:S.arms.map(armPayload)})});
+    const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error,"err"); return; }
+    S.armCrops=j.arms; S.arms.forEach(a=>{ a.wrist=[]; a.elbow=[]; }); msg("#buildMsg","",""); startHand();
+  }catch(e){ msg("#buildMsg","ошибка подготовки руки","err"); }
+};

@@ -24,8 +24,13 @@
     <h2>Загрузите PDF-макет</h2>
     <input type="file" id="pdf" accept="application/pdf">
     <button id="btnUpload">Загрузить</button>
+    <button id="btnLib" class="back">📁 База макетов</button>
     <p class="hint">Векторный PDF макета фигуры (перёд+зад, при наличии — машущая рука).</p>
     <div id="upMsg" class="msg"></div>
+    <div id="libWrap" style="display:none">
+      <h3>Макеты, прогнанные через инструмент</h3>
+      <div id="libGrid" class="libgrid"></div>
+    </div>
   </section>
 
   <!-- ШАГ 2: параметры -->
@@ -101,7 +106,11 @@
       <a id="dlSvg" class="dlbtn" download>Скачать SVG</a>
     </div>
     <div id="previewWrap"></div>
-    <div class="nav"><button class="back" data-to="2">← изменить параметры</button></div>
+    <div class="nav">
+      <button id="editArm">↩ переделать рез руки</button>
+      <button id="editHand">↩ переделать кисть/предплечье</button>
+      <button class="back" data-to="2">← изменить параметры</button>
+    </div>
   </section>
 </main>
 
