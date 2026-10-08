@@ -60,6 +60,8 @@ def _gate():
 def _setcookie(resp):
     if request.args.get("key") == ACCESS_KEY:                          # запомнить ключ в cookie после входа по ссылке
         resp.set_cookie("dash_key", ACCESS_KEY, max_age=30 * 86400, samesite="Lax")
+    if request.path == "/" or request.path.startswith("/static/"):     # HTML/статика — всегда свежие (без устаревшего кэша)
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
     return resp
 
 # базовый конфиг на размер = проверенный cosmo-конфиг (универсальные дефолты + память-оптимизации)

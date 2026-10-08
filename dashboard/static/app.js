@@ -66,7 +66,7 @@ $("#btnUpload").onclick = async () => {
     const fd=new FormData(); fd.append("pdf", f);
     const r=await fetch("/api/upload",{method:"POST",body:fd}); const j=await r.json();
     if(!r.ok){ msg("#upMsg",j.error||"ошибка","err"); return; }
-    S.sid=j.sid; S.meta=j; $("#s2macet").src=imgURL(j.img); msg("#upMsg","макет загружен ✓","ok"); show(2);
+    S.sid=j.sid; S.meta=j; (function(){var _m=$("#s2macet"); if(_m) _m.src=imgURL(j.img);})(); msg("#upMsg","макет загружен ✓","ok"); show(2);
   }catch(e){ msg("#upMsg","ошибка загрузки","err"); }
   finally{ busy($("#btnUpload"),false); }
 };
@@ -367,7 +367,7 @@ async function useLib(id){
   msg("#upMsg","открываю макет из базы…","spin");
   try{ const r=await fetch("/api/library/use",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});
     const j=await r.json(); if(!r.ok){ msg("#upMsg",j.error||"ошибка","err"); return; }
-    S.sid=j.sid; S.meta=j; $("#s2macet").src=imgURL(j.img); msg("#upMsg","макет «"+(j.name||"")+"» загружен ✓","ok");
+    S.sid=j.sid; S.meta=j; (function(){var _m=$("#s2macet"); if(_m) _m.src=imgURL(j.img);})(); msg("#upMsg","макет «"+(j.name||"")+"» загружен ✓","ok");
     $("#libWrap").style.display="none"; show(2);
   }catch(e){ msg("#upMsg","ошибка открытия макета","err"); }
 }
