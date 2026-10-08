@@ -5,6 +5,11 @@ const S = { sid:null, meta:null, size:"2700", n:1, ident:false,
             armCrops:[],        // метаданные кропов рук из /api/arm_preview
             cur:0 };
 
+// ключ доступа (из URL или cookie) -> добавляем к картинкам, чтобы <img> точно прошёл гейт
+const KEY = new URLSearchParams(location.search).get("key")
+  || (document.cookie.match(/(?:^|; )dash_key=([^;]+)/) || [])[1] || "";
+function imgURL(u){ return u + (u.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(KEY) + "&t=" + Date.now(); }
+
 const $ = s => document.querySelector(s);
 const show = n => { document.querySelectorAll(".panel").forEach(p=>p.classList.remove("on"));
   $("#s"+n).classList.add("on");
@@ -16,14 +21,25 @@ class Picker {
     this.meta=null; this.scale=1; this.overlay=()=>{};
     canvas.addEventListener("click", e=>this._click(e)); }
   load(url, meta, overlay, onClick){
-    this.meta=meta; this.overlay=overlay; this.onClick=onClick;
-    const im=new Image(); im.onload=()=>{ this.img=im;
+    this.meta=meta; this.overlay=overlay; this.onClick=onClick; this.img=null;
+    this.cv.width=880; this.cv.height=440;                         // плейсхолдер на время загрузки
+    this._loading=true; this._tick=0; this._anim();
+    const im=new Image();
+    im.onload=()=>{ this._loading=false; this.img=im;
       const maxw=880; this.scale=Math.min(1, maxw/im.naturalWidth);
       this.cv.width=Math.round(im.naturalWidth*this.scale);
       this.cv.height=Math.round(im.naturalHeight*this.scale);
       this.draw(); };
-    im.src=url+"?t="+Date.now();
+    im.onerror=()=>{ this._loading=false; this._msg("⚠ не удалось загрузить фото — обновите страницу", "#c0392b"); };
+    im.src=imgURL(url);
   }
+  _anim(){ if(!this._loading) return;
+    this._msg("Загрузка фото" + ".".repeat(1 + this._tick % 3), "#2b8cf0");
+    this._tick++; setTimeout(()=>this._anim(), 350); }
+  _msg(t, color){ const c=this.ctx; c.clearRect(0,0,this.cv.width,this.cv.height);
+    c.fillStyle="#f0f3f7"; c.fillRect(0,0,this.cv.width,this.cv.height);
+    c.fillStyle=color; c.font="bold 22px sans-serif"; c.textAlign="center";
+    c.fillText(t, this.cv.width/2, this.cv.height/2); c.textAlign="left"; }
   // пиксель дисплея -> PT ;  PT -> пиксель дисплея
   toPT(dx,dy){ const m=this.meta; return [ dx/this.scale/m.zoom + m.ox, dy/this.scale/m.zoom + m.oy ]; }
   toPx(pt){ const m=this.meta; return [ (pt[0]-m.ox)*m.zoom*this.scale, (pt[1]-m.oy)*m.zoom*this.scale ]; }
@@ -174,8 +190,8 @@ async function poll(){
   msg("#buildMsg", j.msg || j.status, j.status==="error"?"err":"");
   if(j.status==="done"){
     $("#dl").style.display="block";
-    $("#dlPdf").href=j.pdf; $("#dlSvg").style.display = j.svg?"inline-block":"none"; if(j.svg) $("#dlSvg").href=j.svg;
-    if(j.png) $("#previewWrap").innerHTML=`<img src="${j.png}?t=${Date.now()}">`;
+    $("#dlPdf").href=imgURL(j.pdf); $("#dlSvg").style.display = j.svg?"inline-block":"none"; if(j.svg) $("#dlSvg").href=imgURL(j.svg);
+    if(j.png) $("#previewWrap").innerHTML=`<img src="${imgURL(j.png)}">`;
     return;
   }
   if(j.status==="error") return;
