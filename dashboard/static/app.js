@@ -56,11 +56,21 @@ $("#btnUpload").onclick = async () => {
 
 // ---------- ШАГ 2: параметры ----------
 $("#narms").onchange = () => { $("#identWrap").style.display = $("#narms").value==="2" ? "inline-block":"none"; };
-$("#toS3").onclick = () => {
+$("#toS3").onclick = async () => {
   S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked;
-  S.arms=Array.from({length:S.n},()=>({f:null,tip:null,blade:[],wrist:[],elbow:[]}));
+  S.arms=Array.from({length:S.n},()=>({f:null,tip:null,blade:[],wrist:[],elbow:[],vertical:false}));
   S.cur=0;
   if(S.n===0){ show(5); return; }
+  show(3); msg("#s3msg","определяю точки реза (авто)…","");
+  try {
+    const r=await fetch("/api/detect",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({sid:S.sid,size:S.size,n_arms:S.n})});
+    const j=await r.json();
+    if(j.arms && j.arms.length){
+      j.arms.forEach((a,i)=>{ if(i<S.n){ S.arms[i].f=a.f; S.arms[i].tip=a.tip; if(a.blade) S.arms[i].blade=a.blade.map(p=>p.slice()); }});
+      msg("#s3msg",`предложено авто: ${j.arms.length} шт. Поправьте точки кликом или смените режим реза.`,"ok");
+    } else { msg("#s3msg","авто-детект не нашёл руку — отметьте точки вручную.",""); }
+  } catch(e){ msg("#s3msg","авто-детект недоступен — вручную.",""); }
   startCut();
 };
 document.querySelectorAll(".back").forEach(b=> b.onclick=()=>show(parseInt(b.dataset.to)));
@@ -68,15 +78,16 @@ document.querySelectorAll(".back").forEach(b=> b.onclick=()=>show(parseInt(b.dat
 // ---------- ШАГ 3: рез руки ----------
 const pick3 = new Picker($("#cv3"));
 let slots3=[];                                   // текущая последовательность слотов
-function cutMode(){ return document.querySelector("input[name=cutmode]:checked").value; }
 function startCut(){
   show(3);
   $("#armLabel").textContent = S.n>1 ? `(рука ${S.cur+1} из ${S.n})` : "";
+  // радио отражает режим текущей руки
+  document.querySelector(`input[name=cutmode][value=${S.arms[S.cur].vertical?"vertical":"chord"}]`).checked=true;
   rebuildSlots3();
   pick3.load(S.meta.img, S.meta, ov3, onPick3);
 }
 function rebuildSlots3(){
-  slots3 = (cutMode()==="chord") ? ["f","tip","blade0","blade1"] : ["f","tip"];
+  slots3 = S.arms[S.cur].vertical ? ["f","tip"] : ["f","tip","blade0","blade1"];
   renderList("#pickList", slots3, slotLabel, slotFilled3);
   updPrompt3();
 }
@@ -97,15 +108,16 @@ function onPick3(pt){ const a=S.arms[S.cur]; const n=nextSlot3(); if(!n) return;
 function ov3(p){ const a=S.arms[S.cur];
   if(a.f) p.dot(a.f,"#e4002b","корень");
   if(a.tip) p.dot(a.tip,"#1560ff","кончик");
-  if(a.blade[0]) p.dot(a.blade[0],"#ff8c00");
-  if(a.blade[1]){ p.dot(a.blade[1],"#ff8c00"); p.line(a.blade[0],a.blade[1],"#ff8c00"); } }
-document.querySelectorAll("input[name=cutmode]").forEach(r=> r.onchange=()=>{ S.arms[S.cur].blade=[]; rebuildSlots3(); pick3.draw(); });
+  if(!a.vertical){
+    if(a.blade[0]) p.dot(a.blade[0],"#ff8c00");
+    if(a.blade[1]){ p.dot(a.blade[1],"#ff8c00"); p.line(a.blade[0],a.blade[1],"#ff8c00"); } } }
+document.querySelectorAll("input[name=cutmode]").forEach(r=> r.onchange=()=>{ S.arms[S.cur].vertical=(r.value==="vertical"); rebuildSlots3(); pick3.draw(); });
 $("#undo3").onclick=()=>{ const a=S.arms[S.cur];
-  if(a.blade.length){ a.blade.pop(); } else if(a.tip){ a.tip=null; } else if(a.f){ a.f=null; }
+  if(!a.vertical && a.blade.length){ a.blade.pop(); } else if(a.tip){ a.tip=null; } else if(a.f){ a.f=null; }
   pick3.draw(); updPrompt3(); };
 $("#armNext").onclick=async()=>{ const a=S.arms[S.cur];
   if(!a.f||!a.tip){ msg("#s3msg","нужны корень и кончик","err"); return; }
-  if(cutMode()==="chord" && a.blade.length<2){ msg("#s3msg","нужны 2 точки хорды","err"); return; }
+  if(!a.vertical && a.blade.length<2){ msg("#s3msg","нужны 2 точки хорды","err"); return; }
   msg("#s3msg","","");
   if(S.cur < S.n-1){ S.cur++; startCut(); return; }
   // все руки размечены -> прогнать рез и перейти к запястью/локтю
@@ -175,7 +187,7 @@ async function poll(){
 }
 
 // ---------- утилиты ----------
-function armPayload(a){ const o={f:a.f,tip:a.tip}; if(a.blade&&a.blade.length===2) o.blade=a.blade;
+function armPayload(a){ const o={f:a.f,tip:a.tip}; if(!a.vertical && a.blade&&a.blade.length===2) o.blade=a.blade;
   if(a.wrist&&a.wrist.length===2) o.wrist=a.wrist; if(a.elbow&&a.elbow.length===2) o.elbow=a.elbow; return o; }
 function renderList(sel, slots, lab, filled){ const ol=$(sel); ol.innerHTML="";
   slots.forEach(s=>{ const li=document.createElement("li"); li.textContent=lab(s); li.dataset.slot=s;

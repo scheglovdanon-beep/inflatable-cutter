@@ -122,11 +122,12 @@ def _build_cfg(size, n_arms, arms_identical, arms):
     return cfg
 
 
-def _render_page_png(pdf_path, out_png, zoom):
+def _render_page_png(pdf_path, out_png, max_px=1600):
     page = pymupdf.open(pdf_path)[0]
+    r = page.rect
+    zoom = min(2.0, max_px / max(r.width, r.height))                   # кап по длинной стороне (лёгкая картинка для моб.)
     pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
     pix.save(out_png)
-    r = page.rect
     return {"w": pix.width, "h": pix.height, "zoom": zoom,
             "ox": float(r.x0), "oy": float(r.y0)}                      # PT = px/zoom + ox/oy
 
@@ -149,7 +150,7 @@ def upload():
     pdf_path = os.path.join(d, "macet.pdf")
     f.save(pdf_path)
     try:
-        meta = _render_page_png(pdf_path, os.path.join(d, "page.png"), PICK_ZOOM)
+        meta = _render_page_png(pdf_path, os.path.join(d, "page.png"))
     except Exception as e:
         shutil.rmtree(d, ignore_errors=True)
         return jsonify(error=f"не удалось прочитать PDF: {e}"), 400
@@ -166,6 +167,50 @@ def img(sid, name):
     if not os.path.isfile(p):
         abort(404)
     return send_file(p)
+
+
+@app.route("/api/detect", methods=["POST"])
+def detect():
+    """Авто-детект машущих рук (подмышка): вернуть предложенные точки реза для каждой руки —
+    f (корень), tip (кончик), blade (хорда реза). Пользователь потом правит/выбирает режим."""
+    data = request.get_json(force=True)
+    d = _sdir(data["sid"])
+    size = data.get("size", "2700")
+    n = int(data.get("n_arms", 1))
+    try:
+        import numpy as np
+        from sides import get_front_figure
+        from arm import detect_armpits, blade_perp
+        from side_color import arm_fill_color
+        cfg = _base_cfg(size)
+        cfg["arm_cut"] = "armpit"
+        cfg["expected_arms"] = n
+        cfg.pop("arm_detect_v2", None)                                 # для подсказки используем контурный детект (даёт f/tip/blade)
+        page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]
+        page._cfg = cfg
+        fig = get_front_figure(page, cfg)
+        arms = detect_armpits(fig.contour_pt, cfg)
+        if n and len(arms) > n:                                        # оставить n самых «рукоподобных» (кожа/рукав: R>>B)
+            def warmth(a):
+                c = arm_fill_color(page, np.asarray(a["poly"].exterior.coords, float))
+                return int(c[0]) - int(c[2])
+            arms = sorted(arms, key=warmth, reverse=True)[:n]
+    except Exception as e:
+        return jsonify(error=f"авто-детект не удался: {e}", arms=[]), 200
+    out = []
+    for a in arms:
+        o = {"f": [float(a["f"][0]), float(a["f"][1])],
+             "tip": [float(a["tip"][0]), float(a["tip"][1])]}
+        bl = a.get("blade")
+        if bl is None:                                                # перпендикулярная хорда реза (как в авто-резе)
+            try:
+                bl = blade_perp(fig.contour_pt, a["f"], a["tip"], cfg)
+            except Exception:
+                bl = None
+        if bl is not None:
+            o["blade"] = [[float(bl[0][0]), float(bl[0][1])], [float(bl[1][0]), float(bl[1][1])]]
+        out.append(o)
+    return jsonify(arms=out, count=len(out))
 
 
 @app.route("/api/arm_preview", methods=["POST"])
