@@ -137,6 +137,8 @@ canvas{display:block; cursor:crosshair; max-width:100%; height:auto; border-radi
 
 /* ---------- Preview + downloads ---------- */
 #previewWrap img, #frontPrevImg img{max-width:100%; margin-top:16px; border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow)}
+#s2imgWrap{padding:10px; display:flex; align-items:flex-start; justify-content:center}
+#s2macet{max-width:100%; max-height:min(60vh,560px); object-fit:contain; border-radius:10px}
 #frontPrevWrap{margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--line)}
 #frontPrevImg img{max-height:520px}
 /* зумируемое превью раскладки */

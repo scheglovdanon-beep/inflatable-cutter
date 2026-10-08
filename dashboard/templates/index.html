@@ -37,30 +37,35 @@
   <!-- ШАГ 2: параметры -->
   <section id="s2" class="panel">
     <h2>Параметры фигуры</h2>
-    <label>Размер фигуры:
-      <select id="size">
-        <option value="1700">1700 мм</option>
-        <option value="2700" selected>2700 мм</option>
-        <option value="3300">3300 мм</option>
-        <option value="4200">4200 мм</option>
-      </select>
-    </label>
-    <label>Машущих рук:
-      <select id="narms">
-        <option value="0">нет</option>
-        <option value="1" selected>1</option>
-        <option value="2">2</option>
-      </select>
-    </label>
-    <label id="identWrap" style="display:none">
-      <input type="checkbox" id="ident"> руки одинаковые (строить одну, копировать)
-    </label>
-    <div style="margin-top:6px">
-      <label><input type="checkbox" id="spare" checked> запасная рука (копия на случай порыва)</label><br>
-      <label><input type="checkbox" id="backCopy"> зад = копия переда (симметричная фигура)</label>
+    <div class="row">
+      <div class="controls">
+        <label>Размер фигуры:
+          <select id="size">
+            <option value="1700">1700 мм</option>
+            <option value="2700" selected>2700 мм</option>
+            <option value="3300">3300 мм</option>
+            <option value="4200">4200 мм</option>
+          </select>
+        </label>
+        <label>Машущих рук:
+          <select id="narms">
+            <option value="0">нет</option>
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+          </select>
+        </label>
+        <label id="identWrap" style="display:none">
+          <input type="checkbox" id="ident"> руки одинаковые (строить одну, копировать)
+        </label>
+        <div style="margin-top:6px">
+          <label><input type="checkbox" id="spare" checked> запасная рука (копия на случай порыва)</label><br>
+          <label><input type="checkbox" id="backCopy"> зад = копия переда (симметричная фигура)</label>
+        </div>
+        <p class="hint">Для фигур с 2 разными руками, где перёд и зад одинаковы (напр. Охотники),
+          включите «зад = копия переда» и выключите запаску — детали лягут ровными колонками.</p>
+      </div>
+      <div class="canvaswrap" id="s2imgWrap"><img id="s2macet" alt="макет"></div>
     </div>
-    <p class="hint">Для фигур с 2 разными руками, где перёд и зад одинаковы (напр. Охотники),
-      включите «зад = копия переда» и выключите запаску — детали лягут ровными колонками.</p>
     <div class="nav"><button class="back" data-to="1">← назад</button><button id="toS3">далее →</button></div>
   </section>
 
