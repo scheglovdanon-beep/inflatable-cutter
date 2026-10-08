@@ -286,7 +286,7 @@ async function poll(){
     busy($("#btnBuild"),false);
     $("#dl").style.display="block";
     $("#dlPdf").href=imgURL(j.pdf); $("#dlSvg").style.display = j.svg?"inline-block":"none"; if(j.svg) $("#dlSvg").href=imgURL(j.svg);
-    if(j.png) makeZoomable($("#previewWrap"), imgURL(j.png));
+    if(j.png) $("#previewWrap").innerHTML=`<img src="${imgURL(j.png)}">`;  // просто картинка на всю ширину, в хорошем качестве
     return;
   }
   if(j.status==="error"){ busy($("#btnBuild"),false); return; }
