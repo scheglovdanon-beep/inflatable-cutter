@@ -33,6 +33,33 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024                    # до 200 МБ PDF
 
+# ---------- токен-доступ (панель публичная -> защищаем ключом) ----------
+# Ключ из env DASH_KEY, иначе из файла dashboard/.access_key (создаётся при первом запуске).
+_KEYFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".access_key")
+ACCESS_KEY = os.environ.get("DASH_KEY")
+if not ACCESS_KEY:
+    if os.path.isfile(_KEYFILE):
+        ACCESS_KEY = open(_KEYFILE).read().strip()
+    else:
+        ACCESS_KEY = uuid.uuid4().hex
+        open(_KEYFILE, "w").write(ACCESS_KEY)
+
+
+@app.before_request
+def _gate():
+    if request.path.startswith("/static/"):
+        return
+    key = request.args.get("key") or request.cookies.get("dash_key") or request.headers.get("X-Key")
+    if key != ACCESS_KEY:
+        return ("Доступ запрещён. Откройте ссылку с ?key=КЛЮЧ.", 403)
+
+
+@app.after_request
+def _setcookie(resp):
+    if request.args.get("key") == ACCESS_KEY:                          # запомнить ключ в cookie после входа по ссылке
+        resp.set_cookie("dash_key", ACCESS_KEY, max_age=30 * 86400, samesite="Lax")
+    return resp
+
 # базовый конфиг на размер = проверенный cosmo-конфиг (универсальные дефолты + память-оптимизации)
 SIZE_BASE = {
     "1700": "config_cosmo1700.yaml",
@@ -235,4 +262,8 @@ def status(sid):
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
+    host = os.environ.get("DASH_HOST", "127.0.0.1")                    # 0.0.0.0 — слушать внешний интерфейс
+    port = int(os.environ.get("DASH_PORT", "5000"))
+    print(f"ACCESS KEY: {ACCESS_KEY}")
+    print(f"URL: http://{host}:{port}/?key={ACCESS_KEY}")
+    app.run(host=host, port=port, debug=False, threaded=True)
