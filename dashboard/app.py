@@ -417,6 +417,64 @@ def arm_preview():
     return jsonify(arms=out, count=len(cut))
 
 
+@app.route("/api/front_preview", methods=["POST"])
+def front_preview():
+    """Превью ТОЛЬКО переда: контур + цветные отрезки, где ляжет рука по ДЛИНЕ отверстия руки
+    (от подмышки вверх на диаметр отверстия). 1 рука — с одной стороны, 2 — с двух."""
+    data = request.get_json(force=True)
+    d = _sdir(data["sid"])
+    size = data.get("size", "2700")
+    arms = data.get("arms", [])
+    try:
+        import numpy as np
+        from PIL import Image, ImageDraw, ImageFont
+        from shapely.geometry import Point
+        from shapely.ops import substring
+        from sides import PT2MM, get_front_figure, contour_to_mm, smooth_front
+        from arm import cut_waving_arms
+        arms = _fill_tips(d, size, arms)
+        cfg = _build_cfg(size, len(arms), data.get("arms_identical", False), arms,
+                         spare=data.get("spare"), back_copy=data.get("back_copy"))
+        page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
+        fig = get_front_figure(page, cfg)                            # ЛЁГКИЙ путь: только контур переда (без боковин/днища/руки)
+        fig.contour_pt, cut = cut_waving_arms(page, fig.contour_pt, cfg, strict=False)
+        front = smooth_front(contour_to_mm(fig), cfg)
+        ext = front.exterior; L = ext.length
+        fmm = fig.s * PT2MM                                          # contour_to_mm = чистый масштаб ×fmm от origin
+        D = float(cfg.get("arm_hole_diameter_mm", 250))
+        segs = []
+        for m in cfg.get("manual_arms", []):
+            pm = (m["f"][0] * fmm, m["f"][1] * fmm)                  # подмышка в мм (тот же масштаб)
+            s0 = ext.project(Point(pm))
+            a = substring(ext, max(0.0, s0 - D), s0)
+            b = substring(ext, s0, min(L, s0 + D))
+            seg = a if a.centroid.y <= b.centroid.y else b            # вверх (меньший y)
+            segs.append(list(seg.coords))
+        # рендер
+        bx0, by0, bx1, by1 = front.bounds; mg = 30.0
+        sc = 1000.0 / max(bx1 - bx0, by1 - by0)
+        W = int((bx1 - bx0) * sc + 2 * mg); H = int((by1 - by0) * sc + 2 * mg)
+        im = Image.new("RGB", (W, H), (255, 255, 255)); dr = ImageDraw.Draw(im)
+        T = lambda x, y: ((x - bx0) * sc + mg, (y - by0) * sc + mg)
+        dr.polygon([T(x, y) for x, y in ext.coords], outline=(20, 24, 32), width=3)
+        cols = [(228, 0, 43), (21, 96, 255), (16, 160, 80), (245, 140, 0)]
+        try: fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
+        except Exception: fnt = ImageFont.load_default()
+        for i, coords in enumerate(segs):
+            col = cols[i % len(cols)]
+            dr.line([T(x, y) for x, y in coords], fill=col, width=9, joint="curve")
+            mx, my = T(*coords[len(coords) // 2])
+            txt = f"рука {i+1}: Ø{D:.0f}мм"
+            if mx > W * 0.5:                                          # у правого края — подпись влево (не обрезать)
+                dr.text((mx - 12, my), txt, fill=col, font=fnt, anchor="rm")
+            else:
+                dr.text((mx + 12, my), txt, fill=col, font=fnt, anchor="lm")
+        fn = "front_preview.png"; im.save(os.path.join(d, fn))
+        return jsonify(img=f"/api/img/{data['sid']}/{fn}", arms=len(segs), hole_mm=D)
+    except Exception as e:
+        return jsonify(error=f"превью переда не удалось: {e}"), 400
+
+
 def _run_build(sid, cfg, want_svg):
     """Фоновая сборка: PDF (+SVG опц.) + превью PNG."""
     job = JOBS[sid]

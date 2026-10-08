@@ -126,7 +126,9 @@ canvas{display:block; cursor:crosshair; max-width:100%; height:auto; border-radi
 #pickList, #pickList4{padding-left:0}
 
 /* ---------- Preview + downloads ---------- */
-#previewWrap img{max-width:100%; margin-top:16px; border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow)}
+#previewWrap img, #frontPrevImg img{max-width:100%; margin-top:16px; border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow)}
+#frontPrevWrap{margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--line)}
+#frontPrevImg img{max-height:520px}
 #dl{display:flex; flex-wrap:wrap; gap:8px; margin:12px 0}
 
 /* ---------- Библиотека ---------- */

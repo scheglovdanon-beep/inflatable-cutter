@@ -87,7 +87,7 @@ $("#toS3").onclick = () => {
   S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked;
   S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
   S.cands=null;
-  if(S.n===0){ show(5); return; }
+  if(S.n===0){ goStep5(); return; }
   enterStep3();
 };
 document.querySelectorAll(".back").forEach(b=> b.onclick=()=>show(parseInt(b.dataset.to)));
@@ -171,7 +171,22 @@ function ov4(p){ const a=S.arms[S.cur];
 $("#undo4").onclick=()=>{ const a=S.arms[S.cur];
   if(a.elbow.length){ a.elbow.pop(); } else if(a.wrist.length){ a.wrist.pop(); }
   pick4.draw(); updPrompt4(); };
-function s4done(){ msg("#s4msg","",""); if(S.cur < S.n-1){ S.cur++; startHand(); } else show(5); }
+function s4done(){ msg("#s4msg","",""); if(S.cur < S.n-1){ S.cur++; startHand(); } else goStep5(); }
+function goStep5(){ show(5); loadFrontPreview(); }
+async function loadFrontPreview(){
+  const w=$("#frontPrevWrap");
+  if(S.n===0){ w.style.display="none"; return; }
+  w.style.display="block"; $("#frontPrevImg").innerHTML=""; msg("#frontPrevMsg","строю превью переда…","");
+  try{
+    const r=await fetch("/api/front_preview",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({sid:S.sid,size:S.size,arms_identical:S.ident,
+        spare:$("#spare").checked,back_copy:$("#backCopy").checked,arms:S.arms.map(armPayload)})});
+    const j=await r.json();
+    if(!r.ok){ msg("#frontPrevMsg",j.error||"не удалось","err"); return; }
+    msg("#frontPrevMsg",`цветом — где ляжет рука (${j.arms} шт., длина = Ø${j.hole_mm} мм отверстия)`,"ok");
+    $("#frontPrevImg").innerHTML=`<img src="${imgURL(j.img)}">`;
+  }catch(e){ msg("#frontPrevMsg","ошибка превью переда","err"); }
+}
 $("#armNext4").onclick=()=>{ const a=S.arms[S.cur];
   if(a.wrist.length<2||a.elbow.length<2){ msg("#s4msg","нужны по 2 точки на запястье и локоть (или «пропустить»)","err"); return; }
   s4done(); };
