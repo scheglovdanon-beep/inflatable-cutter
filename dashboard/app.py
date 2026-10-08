@@ -502,9 +502,13 @@ def _run_build(sid, cfg, want_svg):
             return
         job["pdf"] = f"/api/img/{sid}/layout.pdf"
         job["msg"] = "рендерю превью…"
+        import math as _m
         page = pymupdf.open(out_pdf)[0]
         rr = page.rect
-        z = min(1900.0 / rr.width, 1900.0 / rr.height)
+        z = 4200.0 / max(rr.width, rr.height)                        # чётче (длинная сторона ~4200px)
+        mp = (rr.width * z) * (rr.height * z)
+        if mp > 60e6:                                                # кап по пикселям (огромные раскладки 4200)
+            z *= _m.sqrt(60e6 / mp)
         page.get_pixmap(matrix=pymupdf.Matrix(z, z)).save(os.path.join(d, "layout.png"))
         job["png"] = f"/api/img/{sid}/layout.png"
         if want_svg:

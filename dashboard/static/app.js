@@ -255,7 +255,7 @@ async function poll(){
   if(j.status==="done"){
     $("#dl").style.display="block";
     $("#dlPdf").href=imgURL(j.pdf); $("#dlSvg").style.display = j.svg?"inline-block":"none"; if(j.svg) $("#dlSvg").href=imgURL(j.svg);
-    if(j.png) $("#previewWrap").innerHTML=`<img src="${imgURL(j.png)}">`;
+    if(j.png) makeZoomable($("#previewWrap"), imgURL(j.png));
     return;
   }
   if(j.status==="error") return;
@@ -275,6 +275,40 @@ function markActive(sel, slots, filled, next){ $(sel).querySelectorAll("li").for
     li.classList.toggle("filled", filled(li.dataset.slot));
     li.classList.toggle("active", li.dataset.slot===next); }); }
 function msg(sel,t,cls){ const e=$(sel); e.textContent=t; e.className="msg "+(cls||""); }
+
+// ---------- Зумируемое превью раскладки ----------
+function makeZoomable(container, url){
+  container.innerHTML =
+    `<div class="zoomctl"><button data-z="in">＋ приблизить</button><button data-z="out">－ отдалить</button>`+
+    `<button data-z="reset" class="back">сброс</button><span class="zhint">колесо/пинч — зум, тащить — двигать</span></div>`+
+    `<div class="zviewport"><img class="zimg" draggable="false"></div>`;
+  const vp=container.querySelector(".zviewport"), img=container.querySelector(".zimg");
+  let fit=1, scale=1, tx=0, ty=0, natW=0, natH=0;
+  const apply=()=>{ img.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`; };
+  function center(){ const r=vp.getBoundingClientRect();
+    fit=Math.min(r.width/natW, r.height/natH)||1; scale=fit;
+    tx=(r.width-natW*fit)/2; ty=(r.height-natH*fit)/2; apply(); }
+  function zoomAt(cx,cy,f){ const r=vp.getBoundingClientRect(); const x=cx-r.left, y=cy-r.top;
+    const ns=Math.min(fit*20, Math.max(fit, scale*f)); tx=x-(x-tx)*(ns/scale); ty=y-(y-ty)*(ns/scale); scale=ns; apply(); }
+  img.onload=()=>{ natW=img.naturalWidth; natH=img.naturalHeight; center(); };
+  img.src=url;
+  vp.addEventListener("wheel",e=>{ e.preventDefault(); zoomAt(e.clientX,e.clientY, e.deltaY<0?1.2:1/1.2); },{passive:false});
+  // перетаскивание + пинч
+  const pts=new Map(); let pd=0;
+  vp.addEventListener("pointerdown",e=>{ pts.set(e.pointerId,[e.clientX,e.clientY]); vp.setPointerCapture(e.pointerId); vp.style.cursor="grabbing"; });
+  vp.addEventListener("pointermove",e=>{ if(!pts.has(e.pointerId)) return;
+    const prev=pts.get(e.pointerId); pts.set(e.pointerId,[e.clientX,e.clientY]);
+    if(pts.size===2){ const [a,b]=[...pts.values()]; const nd=Math.hypot(a[0]-b[0],a[1]-b[1]);
+      if(pd){ zoomAt((a[0]+b[0])/2,(a[1]+b[1])/2, nd/pd); } pd=nd; }
+    else { tx+=e.clientX-prev[0]; ty+=e.clientY-prev[1]; apply(); } });
+  const up=e=>{ pts.delete(e.pointerId); if(pts.size<2) pd=0; if(!pts.size) vp.style.cursor="grab"; };
+  vp.addEventListener("pointerup",up); vp.addEventListener("pointercancel",up);
+  vp.addEventListener("dblclick",center);
+  container.querySelector('[data-z=in]').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1.5);};
+  container.querySelector('[data-z=out]').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1/1.5);};
+  container.querySelector('[data-z=reset]').onclick=center;
+  window.addEventListener("resize",center);
+}
 
 // ---------- База макетов ----------
 $("#btnLib").onclick = async () => {

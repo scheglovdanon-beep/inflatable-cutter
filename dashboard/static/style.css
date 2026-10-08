@@ -129,6 +129,16 @@ canvas{display:block; cursor:crosshair; max-width:100%; height:auto; border-radi
 #previewWrap img, #frontPrevImg img{max-width:100%; margin-top:16px; border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow)}
 #frontPrevWrap{margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--line)}
 #frontPrevImg img{max-height:520px}
+/* зумируемое превью раскладки */
+.zoomctl{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:14px 0 8px}
+.zoomctl .zhint{color:var(--muted); font-size:12.5px}
+.zviewport{position:relative; overflow:hidden; height:min(72vh,660px); background:
+  linear-gradient(45deg,#fbfcfe 25%,transparent 25%,transparent 75%,#fbfcfe 75%) 0 0/22px 22px,
+  linear-gradient(45deg,#fbfcfe 25%,#f1f4f9 25%,#f1f4f9 75%,#fbfcfe 75%) 11px 11px/22px 22px, #f6f8fb;
+  border:1px solid var(--line); border-radius:var(--radius); touch-action:none; cursor:grab; box-shadow:var(--shadow)}
+.zviewport .zimg{position:absolute; top:0; left:0; transform-origin:0 0; max-width:none;
+  margin:0; border:0; border-radius:0; box-shadow:none;
+  user-select:none; -webkit-user-drag:none; image-rendering:auto}
 #dl{display:flex; flex-wrap:wrap; gap:8px; margin:12px 0}
 
 /* ---------- Библиотека ---------- */
