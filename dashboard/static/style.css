@@ -1,0 +1,32 @@
+* { box-sizing: border-box; }
+body { font-family: system-ui, "Segoe UI", sans-serif; margin: 0; color: #1b1f24; background: #f4f6f8; }
+header { background: #16233b; color: #fff; padding: 14px 24px; }
+header h1 { margin: 0 0 8px; font-size: 20px; }
+.steps { display: flex; gap: 8px; flex-wrap: wrap; }
+.step { font-size: 13px; padding: 4px 10px; border-radius: 14px; background: #2a3a5c; color: #9fb3d6; }
+.step.on { background: #4da3ff; color: #fff; }
+.step.done { background: #2e7d32; color: #fff; }
+main { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+.panel { display: none; background: #fff; border-radius: 10px; padding: 22px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.panel.on { display: block; }
+h2 { margin-top: 0; }
+label { display: inline-block; margin: 8px 16px 8px 0; font-size: 15px; }
+select, input[type=file] { font-size: 15px; padding: 5px; }
+button { font-size: 15px; padding: 8px 16px; border: 0; border-radius: 6px; background: #4da3ff; color: #fff; cursor: pointer; margin: 4px 4px 4px 0; }
+button:hover { background: #2b8cf0; }
+button.back { background: #8894a6; }
+.nav { margin-top: 18px; border-top: 1px solid #eee; padding-top: 14px; }
+.hint { color: #667; font-size: 13px; }
+.msg { margin: 10px 0; font-size: 14px; white-space: pre-wrap; }
+.msg.err { color: #c0392b; }
+.msg.ok { color: #2e7d32; }
+.row { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.controls { flex: 0 0 300px; }
+.canvaswrap { flex: 1 1 500px; overflow: auto; border: 1px solid #dde; border-radius: 6px; background: #fafbfc; }
+canvas { display: block; cursor: crosshair; max-width: 100%; }
+#pickList li, #pickList4 li { font-size: 14px; margin: 3px 0; }
+#pickList li.filled, #pickList4 li.filled { color: #2e7d32; }
+#pickList li.active, #pickList4 li.active { font-weight: bold; color: #2b8cf0; }
+.prompt { font-weight: bold; color: #2b8cf0; min-height: 20px; }
+.dlbtn { display: inline-block; margin: 8px 8px 8px 0; padding: 10px 18px; background: #2e7d32; color: #fff; border-radius: 6px; text-decoration: none; }
+#previewWrap img { max-width: 100%; margin-top: 14px; border: 1px solid #dde; border-radius: 6px; }

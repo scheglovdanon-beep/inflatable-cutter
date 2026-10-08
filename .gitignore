@@ -10,3 +10,7 @@ out/_ps_*
 out/_roll_cfg.yaml
 _dbg_*.py
 _dbg*.log
+
+# веб-дашборд: загрузки/выходы сессий
+dashboard/sessions/*
+!dashboard/sessions/.gitkeep

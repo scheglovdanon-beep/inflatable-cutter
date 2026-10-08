@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Раскрой надувных фигур — админка</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Раскрой надувных фигур</h1>
+  <div class="steps">
+    <span class="step on" data-s="1">1. Макет</span>
+    <span class="step" data-s="2">2. Параметры</span>
+    <span class="step" data-s="3">3. Рез руки</span>
+    <span class="step" data-s="4">4. Кисть/предплечье</span>
+    <span class="step" data-s="5">5. Раскладка</span>
+  </div>
+</header>
+
+<main>
+  <!-- ШАГ 1: загрузка -->
+  <section id="s1" class="panel on">
+    <h2>Загрузите PDF-макет</h2>
+    <input type="file" id="pdf" accept="application/pdf">
+    <button id="btnUpload">Загрузить</button>
+    <p class="hint">Векторный PDF макета фигуры (перёд+зад, при наличии — машущая рука).</p>
+    <div id="upMsg" class="msg"></div>
+  </section>
+
+  <!-- ШАГ 2: параметры -->
+  <section id="s2" class="panel">
+    <h2>Параметры фигуры</h2>
+    <label>Размер фигуры:
+      <select id="size">
+        <option value="1700">1700 мм</option>
+        <option value="2700" selected>2700 мм</option>
+        <option value="3300">3300 мм</option>
+        <option value="4200">4200 мм</option>
+      </select>
+    </label>
+    <label>Машущих рук:
+      <select id="narms">
+        <option value="0">нет</option>
+        <option value="1" selected>1</option>
+        <option value="2">2</option>
+      </select>
+    </label>
+    <label id="identWrap" style="display:none">
+      <input type="checkbox" id="ident"> руки одинаковые (строить одну, копировать)
+    </label>
+    <div class="nav"><button class="back" data-to="1">← назад</button><button id="toS3">далее →</button></div>
+  </section>
+
+  <!-- ШАГ 3: рез руки -->
+  <section id="s3" class="panel">
+    <h2>Рез руки <span id="armLabel"></span></h2>
+    <div class="row">
+      <div class="controls">
+        <p>Режим реза:</p>
+        <label><input type="radio" name="cutmode" value="chord" checked> хорда (2 точки у корня)</label><br>
+        <label><input type="radio" name="cutmode" value="vertical"> вертикальный (0 точек, рез вверх от корня)</label>
+        <ol id="pickList"></ol>
+        <p class="prompt" id="prompt3"></p>
+        <button id="undo3">← убрать точку</button>
+        <button id="armNext">подтвердить руку →</button>
+        <div id="s3msg" class="msg"></div>
+      </div>
+      <div class="canvaswrap"><canvas id="cv3"></canvas></div>
+    </div>
+    <div class="nav"><button class="back" data-to="2">← назад</button></div>
+  </section>
+
+  <!-- ШАГ 4: кисть/предплечье -->
+  <section id="s4" class="panel">
+    <h2>Срез запястья и локтя <span id="armLabel4"></span></h2>
+    <div class="row">
+      <div class="controls">
+        <p>Отметьте на руке:</p>
+        <ol id="pickList4"></ol>
+        <p class="prompt" id="prompt4"></p>
+        <button id="undo4">← убрать точку</button>
+        <button id="armNext4">подтвердить руку →</button>
+        <p class="hint">Запястье — 2 точки (хорда реза кисти), локоть — 2 точки (хорда предплечья).</p>
+        <div id="s4msg" class="msg"></div>
+      </div>
+      <div class="canvaswrap"><canvas id="cv4"></canvas></div>
+    </div>
+    <div class="nav"><button class="back" data-to="3">← назад</button></div>
+  </section>
+
+  <!-- ШАГ 5: сборка -->
+  <section id="s5" class="panel">
+    <h2>Раскладка</h2>
+    <button id="btnBuild">Собрать раскладку</button>
+    <div id="buildMsg" class="msg"></div>
+    <div id="dl" style="display:none">
+      <a id="dlPdf" class="dlbtn" download>Скачать PDF</a>
+      <a id="dlSvg" class="dlbtn" download>Скачать SVG</a>
+    </div>
+    <div id="previewWrap"></div>
+    <div class="nav"><button class="back" data-to="2">← изменить параметры</button></div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
