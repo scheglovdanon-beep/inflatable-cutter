@@ -161,7 +161,8 @@ def _vtiles(poly, max_w, seam_mm):
     """РЕЗ панели (перёд/зад) на вертикальные полосы под печатный холст max_w (1440). Если ширина
     W>max_w -> N=ceil(W/max_w) РАВНЫХ полос на всю высоту (высота уходит вдоль рулона — там без
     ограничений), рез строго вертикальный встык. Каждая полоса = (контур ∩ полоса, +припуск seam
-    по всем краям вкл. линию реза). Возвращает [(tile_poly, tile_seam)...] или None если резать не надо."""
+    по всем краям вкл. линию реза). Возвращает [(tile_poly, tile_seam, bx0, bx1)...] (bx0/bx1 — границы
+    полосы по X, для обрезки цветовых маркеров) или None если резать не надо."""
     from shapely.geometry import box as _bx
     x0, y0, x1, y1 = poly.bounds; Wp = x1 - x0
     if Wp <= max_w + 1e-6:
@@ -169,7 +170,8 @@ def _vtiles(poly, max_w, seam_mm):
     N = int(-(-Wp // max_w)); tw = Wp / N                              # ceil(W/max_w) равных полос
     tiles = []
     for k in range(N):
-        band = _bx(x0 + k * tw, y0 - 1, x0 + (k + 1) * tw, y1 + 1)     # вертикальная полоса (встык, без нахлёста)
+        bx0, bx1 = x0 + k * tw, x0 + (k + 1) * tw
+        band = _bx(bx0, y0 - 1, bx1, y1 + 1)                           # вертикальная полоса (встык, без нахлёста)
         tp = poly.intersection(band)
         if tp.is_empty:
             continue
@@ -177,7 +179,7 @@ def _vtiles(poly, max_w, seam_mm):
             tp = max((g for g in tp.geoms if g.geom_type == "Polygon"), key=lambda g: g.area, default=None)
             if tp is None:
                 continue
-        tiles.append((tp, tp.buffer(seam_mm, join_style=2, mitre_limit=3.0)))
+        tiles.append((tp, tp.buffer(seam_mm, join_style=2, mitre_limit=3.0), bx0, bx1))
     return tiles if len(tiles) > 1 else None
 
 
@@ -625,21 +627,38 @@ def main():
     lay["_tiles"] = {}                                                 # tilename -> seam-полигон (для _poly_for/_bbox_for)
     if cfg.get("print_split", True):
         holst = cfg.get("print_split_width_mm", cfg.get("roll_width_mm", 1440))
-        def _mk_tiles(prefix, panel_poly, src_bbox, tf):
+        def _clip_arcs_x(arcs, x0, x1):
+            """Обрезать дуги-маркеры по X-зоне полосы [x0,x1] (маркеры лежат в кольце припуска ВНЕ
+            контура, по ~0.6·припуска наружу -> расширяем зону на припуск). Режем на непрерывные куски."""
+            m = seam_mm_v * 1.2; lo, hi = x0 - m, x1 + m; out = []
+            for col, pts in arcs:
+                run = []
+                for x, y in pts:
+                    if lo <= x <= hi:
+                        run.append((x, y))
+                    elif len(run) >= 2:
+                        out.append((col, run)); run = []
+                    else:
+                        run = []
+                if len(run) >= 2:
+                    out.append((col, run))
+            return out
+        def _mk_tiles(prefix, panel_poly, src_bbox, tf, arcs):
             tl = _vtiles(panel_poly, holst, seam_mm_v)
             if not tl:
                 return
             out = []
-            for k, (tp, ts) in enumerate(tl):
+            for k, (tp, ts, bx0, bx1) in enumerate(tl):
                 nm = f"{prefix}_t{k}"
                 body = [_design_raster(page, src_bbox, tf, tp, nextid()),
                         _poly(list(tp.exterior.coords), stroke="#000", sw=lw),
-                        _poly(list(ts.exterior.coords), stroke="#dc0000", sw=lw)]
+                        _poly(list(ts.exterior.coords), stroke="#dc0000", sw=lw),
+                        _arc_paths(_clip_arcs_x(arcs, bx0, bx1), tp, f"seam_{nm}")]   # цветовые маркеры в припуске
                 out.append((nm, body)); lay["_tiles"][nm] = ts
             roll_override[prefix] = out
-        _mk_tiles("front", lay["front"], fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm))
+        _mk_tiles("front", lay["front"], fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm), front_arcs)
         if bk:
-            _mk_tiles("back", bk["poly"], bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]))
+            _mk_tiles("back", bk["poly"], bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), back_arcs)
 
     # БОКОВИНЫ (цвет-зоны + ЧЁРНЫЙ контур + цветной ключ-полоса вдоль стыков в припуске + припуск)
     from side_color import _edges_top_down
