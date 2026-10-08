@@ -597,68 +597,71 @@ def main():
         out.append("</g>")
         return "\n".join(out)
 
-    # ПЕРЁД (текстура ОБРЕЗАНА по контуру + контур + припуск + цветной ключ-полоса — одна группа)
+    # ПЕРЁД/ЗАД как КАНОНИЧЕСКИЕ детали. Если панель шире печатного холста (roll_width_mm, 1440) —
+    # режем ВЕРТИКАЛЬНО встык (+припуск 10мм) на N полос и кладём их РЯДОМ (зазор tgap) как отдельные
+    # детали. Печать (рулон) потом КОПИРУЕТ эти же детали трансформом (_rollpack_svg) — без повторной
+    # отрисовки. Дуги-маркеры стыка с боковинами режутся по X-зоне полосы (_clip_arcs_x).
+    from shapely import affinity as _aff
     fr_bbox = fig.contour_pt.bounds                                   # bbox КОНТУРА (покрывает всю панель, без зазоров)
-    pieces.append(("front", [_design_raster(page, fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm), lay["front"], nextid()),
-                             _poly(list(lay["front"].exterior.coords), stroke="#000", sw=lw),
-                             _poly(list(lay["front_seam"].exterior.coords), stroke="#dc0000", sw=lw),
-                             _arc_paths(front_arcs, lay["front"], "seam_front")]))
+    lay["_tiles"] = {}                                                 # tilename -> seam-полигон (для _poly_for/_bbox_for)
+    _split = cfg.get("print_split", True)
+    holst = cfg.get("print_split_width_mm", cfg.get("roll_width_mm", 1440))
+    tgap = max(2 * seam_mm_v + 20, 40)                                 # зазор между соседними деталями-полосами
 
-    # ЗАД (текстура ОБРЕЗАНА по контуру + контур + припуск + ключ-полоса зеркально — одна группа)
+    def _clip_arcs_x(arcs, x0, x1):
+        """Обрезать дуги-маркеры по X-зоне полосы [x0,x1] (маркеры лежат в кольце припуска ВНЕ
+        контура, по ~0.6·припуска наружу -> расширяем зону на припуск). Режем на непрерывные куски."""
+        m = seam_mm_v * 1.2; lo, hi = x0 - m, x1 + m; out = []
+        for col, pts in arcs:
+            run = []
+            for x, y in pts:
+                if lo <= x <= hi:
+                    run.append((x, y))
+                elif len(run) >= 2:
+                    out.append((col, run)); run = []
+                else:
+                    run = []
+            if len(run) >= 2:
+                out.append((col, run))
+        return out
+
+    def _add_panel(prefix, panel_poly, panel_seam, src_bbox, tf, arcs):
+        """Добавить деталь переда/зада в pieces. Шире холста -> N полос РЯДОМ (зазор tgap), иначе целиком."""
+        tl = _vtiles(panel_poly, holst, seam_mm_v) if _split else None
+        if not tl:                                                    # целиком
+            pieces.append((prefix, [_design_raster(page, src_bbox, tf, panel_poly, nextid()),
+                                    _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw),
+                                    _poly(list(panel_seam.exterior.coords), stroke="#dc0000", sw=lw),
+                                    _arc_paths(arcs, panel_poly, f"seam_{prefix}")]))
+            return
+        cursor = None
+        for k, (tp, ts, bx0, bx1) in enumerate(tl):
+            nm = f"{prefix}_t{k}"
+            if cursor is None:
+                cursor = ts.bounds[0]
+            dx = cursor - ts.bounds[0]                                # сдвиг так, чтобы полосы легли В РЯД с зазором
+            body = [_design_raster(page, src_bbox, tf, tp, nextid()),
+                    _poly(list(tp.exterior.coords), stroke="#000", sw=lw),
+                    _poly(list(ts.exterior.coords), stroke="#dc0000", sw=lw),
+                    _arc_paths(_clip_arcs_x(arcs, bx0, bx1), tp, f"seam_{nm}")]   # цветовые маркеры в припуске
+            if abs(dx) > 1e-6:                                        # та же деталь, просто сдвинута РЯДОМ
+                body = [f'<g transform="translate({dx:.3f},0)">'] + body + ["</g>"]
+            pieces.append((nm, body))
+            lay["_tiles"][nm] = _aff.translate(ts, xoff=dx) if abs(dx) > 1e-6 else ts
+            cursor += (ts.bounds[2] - ts.bounds[0]) + tgap
+
+    _add_panel("front", lay["front"], lay["front_seam"],
+               fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm), front_arcs)
+
     bk = lay.get("back")
     if bk:
-        from sides import back_drawings
         bk_bbox = bk["cut_pt"].bounds if bk.get("cut_pt") else bk["src"].bounds   # bbox КОНТУРА зада
-        # from_front: зад — копия переда, текстуру берём с ПЕРЕДА (симметричная фигура)
-        bbody = [_design_raster(page, bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), bk["poly"], nextid()),
-                 _poly(list(bk["poly"].exterior.coords), stroke="#000", sw=lw)]
-        if bk.get("seam"):
-            bbody.append(_poly(list(bk["seam"].exterior.coords), stroke="#dc0000", sw=lw))
         fb = lay["front"].bounds; bbx = bk["poly"].bounds              # зеркало дуг переда в bbox зада
         fw = (fb[2] - fb[0]) or 1.0; fh = (fb[3] - fb[1]) or 1.0; bw = bbx[2] - bbx[0]; bh = bbx[3] - bbx[1]
         mir = lambda p: (bbx[0] + (1 - (p[0] - fb[0]) / fw) * bw, bbx[1] + (p[1] - fb[1]) / fh * bh)
         back_arcs = [(col, [mir(p) for p in pts]) for col, pts in front_arcs]
-        bbody.append(_arc_paths(back_arcs, bk["poly"], "seam_back"))
-        pieces.append(("back", bbody))
-
-    # РЕЗ НА ПЕЧАТНЫЕ ПОЛОСЫ: перёд/зад шире холста (1440) режем вертикально встык (+припуск 10мм).
-    # Верхняя схема остаётся ЦЕЛОЙ (референс сборки); полосы идут только в ПЕЧАТНЫЙ РУЛОН (roll_override).
-    roll_override = {}                                                 # name -> [(tilename, body)...] замена в рулоне
-    lay["_tiles"] = {}                                                 # tilename -> seam-полигон (для _poly_for/_bbox_for)
-    if cfg.get("print_split", True):
-        holst = cfg.get("print_split_width_mm", cfg.get("roll_width_mm", 1440))
-        def _clip_arcs_x(arcs, x0, x1):
-            """Обрезать дуги-маркеры по X-зоне полосы [x0,x1] (маркеры лежат в кольце припуска ВНЕ
-            контура, по ~0.6·припуска наружу -> расширяем зону на припуск). Режем на непрерывные куски."""
-            m = seam_mm_v * 1.2; lo, hi = x0 - m, x1 + m; out = []
-            for col, pts in arcs:
-                run = []
-                for x, y in pts:
-                    if lo <= x <= hi:
-                        run.append((x, y))
-                    elif len(run) >= 2:
-                        out.append((col, run)); run = []
-                    else:
-                        run = []
-                if len(run) >= 2:
-                    out.append((col, run))
-            return out
-        def _mk_tiles(prefix, panel_poly, src_bbox, tf, arcs):
-            tl = _vtiles(panel_poly, holst, seam_mm_v)
-            if not tl:
-                return
-            out = []
-            for k, (tp, ts, bx0, bx1) in enumerate(tl):
-                nm = f"{prefix}_t{k}"
-                body = [_design_raster(page, src_bbox, tf, tp, nextid()),
-                        _poly(list(tp.exterior.coords), stroke="#000", sw=lw),
-                        _poly(list(ts.exterior.coords), stroke="#dc0000", sw=lw),
-                        _arc_paths(_clip_arcs_x(arcs, bx0, bx1), tp, f"seam_{nm}")]   # цветовые маркеры в припуске
-                out.append((nm, body)); lay["_tiles"][nm] = ts
-            roll_override[prefix] = out
-        _mk_tiles("front", lay["front"], fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm), front_arcs)
-        if bk:
-            _mk_tiles("back", bk["poly"], bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), back_arcs)
+        _add_panel("back", bk["poly"], bk.get("seam") or bk["poly"],
+                   bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]), back_arcs)
 
     # БОКОВИНЫ (цвет-зоны + ЧЁРНЫЙ контур + цветной ключ-полоса вдоль стыков в припуске + припуск)
     from side_color import _edges_top_down
@@ -756,13 +759,7 @@ def main():
         roll_h = cfg.get("roll_width_mm", 1440)
         rgap = 2 * seam_mm_v + 20
         y_off = H + 2 * seam_mm_v + 200                                # ниже фигуры
-        roll_parts = []                                                # в рулон: перёд/зад -> печатные полосы (если резаны)
-        for nm, body in pieces:
-            if nm in roll_override:
-                roll_parts.extend(roll_override[nm])
-            else:
-                roll_parts.append((nm, body))
-        roll_pieces, roll_W = _rollpack_svg(roll_parts, roll_h, rgap, lay,
+        roll_pieces, roll_W = _rollpack_svg(pieces, roll_h, rgap, lay,   # печать = КОПИЯ тех же деталей (вкл. полосы)
                                             y_off=y_off, inst=inst, inst_bbox=inst_bbox)
         pieces = pieces + roll_pieces                                  # фигура (верх) + печать-копия (низ)
         W = max(W, roll_W); H = y_off + roll_h + 2 * seam_mm_v + 100
