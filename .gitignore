@@ -16,3 +16,6 @@ dashboard/sessions/*
 !dashboard/sessions/.gitkeep
 dashboard/library/*
 !dashboard/library/.gitkeep
+
+# секретный токен дашборда — НЕ коммитить
+dashboard/.access_key
