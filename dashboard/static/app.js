@@ -182,6 +182,7 @@ $("#btnBuild").onclick=async()=>{
   $("#dl").style.display="none"; $("#previewWrap").innerHTML="";
   msg("#buildMsg","запускаю сборку (2–5 мин)…","");
   const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,
+    spare:$("#spare").checked, back_copy:$("#backCopy").checked,
     arms:S.arms.map(armPayload)};
   const r=await fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); return; }

@@ -89,16 +89,21 @@ def _base_cfg(size):
     return cfg
 
 
-def _build_cfg(size, n_arms, arms_identical, arms):
+def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None):
     """Собрать cfg из выбора пользователя. arms = [{f:[x,y], tip:[x,y], blade?:[[..],[..]],
-    wrist?:[[..],[..]], elbow?:[[..],[..]]}] в PT."""
+    wrist?:[[..],[..]], elbow?:[[..],[..]]}] в PT. spare — запасная рука (None=как в базе);
+    back_copy — зад=копия переда (симметричная фигура; убирает лишние детали руки у 2-рукой)."""
     cfg = _base_cfg(size)
+    if back_copy is not None:
+        cfg["back_from_front"] = bool(back_copy)
     if int(n_arms) <= 0:
         cfg["make_appendages"] = False
         cfg["make_hand"] = False
         cfg["arm_cut"] = "none"
         cfg["expected_arms"] = 0
         cfg.pop("manual_arms", None)
+        if spare is not None:
+            cfg["make_spare_arm"] = bool(spare)
         return cfg
     # НЕ трогаем make_appendages/make_hand (в базовом cosmo-конфиге они false — рука/кисть строятся
     # из ВЫРЕЗАННОГО куска через arm_template+build_arm_from_poly, а не старым get_arm_contour).
@@ -106,6 +111,8 @@ def _build_cfg(size, n_arms, arms_identical, arms):
     cfg["expected_arms"] = int(n_arms)
     cfg.setdefault("arm_template", True)
     cfg["arms_identical"] = bool(arms_identical)
+    if spare is not None:                                             # запаска — опция из UI
+        cfg["make_spare_arm"] = bool(spare)
     man = []
     for a in arms:
         m = {"f": [float(a["f"][0]), float(a["f"][1])],
@@ -458,7 +465,8 @@ def build():
     arms = data.get("arms", [])
     if int(data.get("n_arms", 0)) > 0:
         arms = _fill_tips(d, size, arms)                              # авто-кончик, если не задан
-    cfg = _build_cfg(size, data.get("n_arms", 0), data.get("arms_identical", False), arms)
+    cfg = _build_cfg(size, data.get("n_arms", 0), data.get("arms_identical", False), arms,
+                     spare=data.get("spare"), back_copy=data.get("back_copy"))
     JOBS[sid] = {"status": "queued", "msg": "в очереди", "pdf": None, "svg": None, "png": None}
     threading.Thread(target=_run_build, args=(sid, cfg, bool(data.get("svg", True))), daemon=True).start()
     return jsonify(sid=sid, status="queued")
