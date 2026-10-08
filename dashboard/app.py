@@ -27,8 +27,10 @@ from flask import Flask, request, jsonify, send_file, render_template, abort
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))      # /opt/inflatable-cutter
 SESS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
 LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "library")   # база прогнанных макетов
+BUILDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "builds")  # галерея готовых раскладок
 os.makedirs(SESS, exist_ok=True)
 os.makedirs(LIB, exist_ok=True)
+os.makedirs(BUILDS, exist_ok=True)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
@@ -74,7 +76,12 @@ SIZE_BASE = {
 PICK_ZOOM = 2.0                                                        # пикс/PT для картинки выбора точек (стр. целиком)
 ARM_ZOOM = 4.0                                                        # пикс/PT для кропа руки (точный выбор запястья/локтя)
 
-JOBS = {}                                                             # job_id -> {"status","msg","pdf","svg","png"}
+import time as _time
+JOBS = {}                                                             # job_id -> job dict
+Q = []                                                                # очередь сборок (job_id по порядку)
+Q_LOCK = threading.Lock()
+Q_WAKE = threading.Event()
+EST = {"secs": 210.0}                                                 # оценка длительности сборки (скользящая)
 
 
 def _sdir(sid):
@@ -485,71 +492,167 @@ def front_preview():
         return jsonify(error=f"превью переда не удалось: {e}"), 400
 
 
-def _run_build(sid, cfg, want_svg):
-    """Фоновая сборка: PDF (+SVG опц.) + превью PNG."""
-    job = JOBS[sid]
-    d = os.path.join(SESS, sid)
-    cfg_path = os.path.join(d, "cfg.yaml")
-    yaml.safe_dump(cfg, open(cfg_path, "w", encoding="utf-8"), allow_unicode=True)
-    pdf_in = os.path.join(d, "macet.pdf")
-    out_pdf = os.path.join(d, "layout.pdf")
-    runcap = os.path.join(ROOT, "run_capped.sh")
-    env = dict(os.environ)
+def _save_build_catalog(job, d):
+    """Сохранить готовую раскладку в ГАЛЕРЕЮ (персистентно): превью + pdf/svg + мета (имя/размер/руки)."""
     try:
-        job["status"] = "running"; job["msg"] = "строю PDF-раскладку…"
+        from PIL import Image
+        bd = os.path.join(BUILDS, job["id"]); os.makedirs(bd, exist_ok=True)
+        lp = os.path.join(d, "layout.png")
+        if os.path.isfile(lp):
+            im = Image.open(lp); im.thumbnail((640, 640)); im.save(os.path.join(bd, "thumb.png"))
+        for f in ("layout.pdf", "layout.svg"):
+            if os.path.isfile(os.path.join(d, f)):
+                shutil.copy2(os.path.join(d, f), os.path.join(bd, f))
+        json.dump({"id": job["id"], "name": job["name"], "size": job["size"], "n_arms": job["n_arms"]},
+                  open(os.path.join(bd, "meta.json"), "w"))
+    except Exception:
+        pass
+
+
+def _run_job(job):
+    """Выполнить ОДНУ сборку (в воркере, по очереди): PDF (+SVG) + превью + сохранить в галерею."""
+    job["status"] = "running"; job["started"] = _time.time(); job["msg"] = "строю PDF-раскладку…"
+    Q_WAKE.set()
+    sid = job["sid"]; d = os.path.join(SESS, sid)
+    cfg_path = os.path.join(d, "cfg.yaml")
+    yaml.safe_dump(job["cfg"], open(cfg_path, "w", encoding="utf-8"), allow_unicode=True)
+    pdf_in = os.path.join(d, "macet.pdf"); out_pdf = os.path.join(d, "layout.pdf")
+    runcap = os.path.join(ROOT, "run_capped.sh"); env = dict(os.environ)
+    try:
         cmd = [runcap, os.path.join(ROOT, "venv/bin/python"),
                os.path.join(ROOT, "export_pdf_grouped.py"), pdf_in, "--config", cfg_path, "-o", out_pdf]
         r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, env=env, timeout=1200)
         if r.returncode != 0 or not os.path.isfile(out_pdf):
-            job["status"] = "error"; job["msg"] = "ошибка сборки PDF:\n" + (r.stderr or r.stdout)[-1500:]
-            return
-        job["pdf"] = f"/api/img/{sid}/layout.pdf"
-        job["msg"] = "рендерю превью…"
+            job["status"] = "error"; job["msg"] = "ошибка сборки PDF:\n" + (r.stderr or r.stdout)[-1200:]
+            job["finished"] = _time.time(); return
+        job["pdf"] = f"/api/img/{sid}/layout.pdf"; job["msg"] = "рендерю превью…"
         import math as _m
-        page = pymupdf.open(out_pdf)[0]
-        rr = page.rect
-        z = 4200.0 / max(rr.width, rr.height)                        # чётче (длинная сторона ~4200px)
-        mp = (rr.width * z) * (rr.height * z)
-        if mp > 60e6:                                                # кап по пикселям (огромные раскладки 4200)
+        page = pymupdf.open(out_pdf)[0]; rr = page.rect
+        z = 4200.0 / max(rr.width, rr.height); mp = (rr.width * z) * (rr.height * z)
+        if mp > 60e6:
             z *= _m.sqrt(60e6 / mp)
         page.get_pixmap(matrix=pymupdf.Matrix(z, z)).save(os.path.join(d, "layout.png"))
         job["png"] = f"/api/img/{sid}/layout.png"
-        if want_svg:
-            job["msg"] = "строю SVG…"
-            out_svg = os.path.join(d, "layout.svg")
-            cmd[-1] = out_svg
+        if job.get("want_svg"):
+            job["msg"] = "строю SVG…"; out_svg = os.path.join(d, "layout.svg"); cmd[-1] = out_svg
             rs = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, env=env, timeout=1200)
             if rs.returncode == 0 and os.path.isfile(out_svg):
                 job["svg"] = f"/api/img/{sid}/layout.svg"
-        job["status"] = "done"; job["msg"] = "готово"
+        job["status"] = "done"; job["msg"] = "готово"; job["finished"] = _time.time()
+        EST["secs"] = 0.6 * EST["secs"] + 0.4 * (job["finished"] - job["started"])  # скользящая оценка
+        _save_build_catalog(job, d)
     except subprocess.TimeoutExpired:
-        job["status"] = "error"; job["msg"] = "таймаут сборки (>20 мин)"
+        job["status"] = "error"; job["msg"] = "таймаут сборки (>20 мин)"; job["finished"] = _time.time()
     except Exception as e:
-        job["status"] = "error"; job["msg"] = f"исключение: {e}"
+        job["status"] = "error"; job["msg"] = f"исключение: {e}"; job["finished"] = _time.time()
+
+
+def _worker():
+    """Один воркер: берёт из очереди Q по очереди (последовательно, НЕ параллельно)."""
+    while True:
+        jid = None
+        with Q_LOCK:
+            for j in Q:
+                if JOBS.get(j, {}).get("status") == "queued":
+                    jid = j; break
+        if jid is None:
+            Q_WAKE.wait(timeout=5); Q_WAKE.clear(); continue
+        _run_job(JOBS[jid])
+
+
+threading.Thread(target=_worker, daemon=True).start()
 
 
 @app.route("/api/build", methods=["POST"])
 def build():
+    """Поставить сборку В ОЧЕРЕДЬ (выполняется по одной). Возвращает job_id."""
     data = request.get_json(force=True)
-    sid = data["sid"]
-    d = _sdir(sid)
-    size = data.get("size", "2700")
-    arms = data.get("arms", [])
-    if int(data.get("n_arms", 0)) > 0:
-        arms = _fill_tips(d, size, arms)                              # авто-кончик, если не задан
-    cfg = _build_cfg(size, data.get("n_arms", 0), data.get("arms_identical", False), arms,
+    sid = data["sid"]; d = _sdir(sid)
+    size = data.get("size", "2700"); n = int(data.get("n_arms", 0)); arms = data.get("arms", [])
+    if n > 0:
+        arms = _fill_tips(d, size, arms)
+    cfg = _build_cfg(size, n, data.get("arms_identical", False), arms,
                      spare=data.get("spare"), back_copy=data.get("back_copy"))
-    JOBS[sid] = {"status": "queued", "msg": "в очереди", "pdf": None, "svg": None, "png": None}
-    threading.Thread(target=_run_build, args=(sid, cfg, bool(data.get("svg", True))), daemon=True).start()
-    return jsonify(sid=sid, status="queued")
+    jid = uuid.uuid4().hex[:10]
+    job = {"id": jid, "sid": sid, "cfg": cfg, "want_svg": bool(data.get("svg", True)),
+           "name": (data.get("name") or "макет"), "size": size, "n_arms": n,
+           "status": "queued", "msg": "в очереди", "pdf": None, "svg": None, "png": None,
+           "started": None, "finished": None, "created": _time.time()}
+    JOBS[jid] = job
+    with Q_LOCK:
+        Q.append(jid)
+    Q_WAKE.set()
+    return jsonify(job_id=jid, status="queued")
 
 
-@app.route("/api/status/<sid>")
-def status(sid):
-    job = JOBS.get(sid)
-    if not job:
-        return jsonify(status="unknown"), 404
-    return jsonify(**job)
+@app.route("/api/queue")
+def queue_state():
+    """Состояние очереди: все задания с позицией/прогрессом/временем."""
+    now = _time.time(); est = max(30.0, EST["secs"]); out = []
+    with Q_LOCK:
+        order = list(Q)
+    pos = 0
+    for jid in order:
+        j = JOBS.get(jid)
+        if not j:
+            continue
+        it = {"id": jid, "name": j["name"], "size": j["size"], "n_arms": j["n_arms"],
+              "status": j["status"], "msg": j["msg"], "pdf": j["pdf"], "svg": j["svg"], "png": j["png"]}
+        if j["status"] == "queued":
+            pos += 1; it["pos"] = pos; it["eta"] = round(pos * est)        # ~ своя очередь · оценка
+        elif j["status"] == "running":
+            el = now - (j["started"] or now); it["elapsed"] = round(el)
+            it["eta"] = round(max(0, est - el)); it["progress"] = min(0.97, el / est)
+        elif j["status"] == "done":
+            it["elapsed"] = round((j["finished"] or now) - (j["started"] or now)); it["progress"] = 1.0
+        out.append(it)
+    return jsonify(jobs=out, est=round(est))
+
+
+@app.route("/api/queue/clear_done", methods=["POST"])
+def queue_clear_done():
+    """Убрать завершённые/ошибочные из списка очереди (готовые остаются в галерее)."""
+    with Q_LOCK:
+        Q[:] = [j for j in Q if JOBS.get(j, {}).get("status") in ("queued", "running")]
+    return jsonify(ok=True)
+
+
+# ---------- Галерея готовых раскладок ----------
+
+@app.route("/api/builds")
+def builds_list():
+    items = []
+    for bid in os.listdir(BUILDS):
+        md = os.path.join(BUILDS, bid, "meta.json")
+        if not os.path.isfile(md):
+            continue
+        try:
+            m = json.load(open(md)); bd = os.path.join(BUILDS, bid)
+            items.append({"id": bid, "name": m.get("name"), "size": m.get("size"), "n_arms": m.get("n_arms"),
+                          "thumb": f"/api/buildimg/{bid}",
+                          "pdf": f"/api/buildfile/{bid}/layout.pdf" if os.path.isfile(os.path.join(bd, "layout.pdf")) else None,
+                          "svg": f"/api/buildfile/{bid}/layout.svg" if os.path.isfile(os.path.join(bd, "layout.svg")) else None,
+                          "t": os.path.getmtime(md)})
+        except Exception:
+            continue
+    items.sort(key=lambda x: -x["t"])
+    return jsonify(items=items)
+
+
+@app.route("/api/buildimg/<bid>")
+def buildimg(bid):
+    p = os.path.join(BUILDS, os.path.basename(bid), "thumb.png")
+    if not os.path.isfile(p):
+        abort(404)
+    return send_file(p)
+
+
+@app.route("/api/buildfile/<bid>/<name>")
+def buildfile(bid, name):
+    p = os.path.join(BUILDS, os.path.basename(bid), os.path.basename(name))
+    if not os.path.isfile(p):
+        abort(404)
+    return send_file(p, as_attachment=True)
 
 
 if __name__ == "__main__":

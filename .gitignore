@@ -19,3 +19,5 @@ dashboard/library/*
 
 # секретный токен дашборда — НЕ коммитить
 dashboard/.access_key
+dashboard/builds/*
+!dashboard/builds/.gitkeep

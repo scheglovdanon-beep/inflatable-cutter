@@ -265,33 +265,69 @@ $("#armNext4").onclick=()=>{ const a=S.arms[S.cur];
 $("#skip4").onclick=()=>{ const a=S.arms[S.cur]; a.wrist=[]; a.elbow=[];   // авто-детект запястья/локтя
   busy($("#skip4"),true,"готовлю"); s4done(); busy($("#skip4"),false); };
 
-// ---------- ШАГ 5: сборка ----------
+// ---------- ШАГ 5: сборка -> В ОЧЕРЕДЬ ----------
+function figName(){ const nm=(S.meta&&S.meta.name)? S.meta.name.replace(/\.pdf$/i,"") : "макет"; return nm; }
 $("#btnBuild").onclick=async()=>{
-  $("#dl").style.display="none"; $("#previewWrap").innerHTML="";
-  busy($("#btnBuild"),true,"собираю"); msg("#buildMsg","запускаю сборку (2–5 мин)…","spin");
+  busy($("#btnBuild"),true,"добавляю");
   try{
-    const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,
-      spare:$("#spare").checked, back_copy:$("#backCopy").checked,
-      arms:S.arms.map(armPayload)};
+    const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,name:figName(),
+      spare:$("#spare").checked, back_copy:$("#backCopy").checked, arms:S.arms.map(armPayload)};
     const r=await fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); busy($("#btnBuild"),false); return; }
-    poll();
-  }catch(e){ msg("#buildMsg","ошибка запуска сборки","err"); busy($("#btnBuild"),false); }
+    const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); return; }
+    msg("#buildMsg","✓ добавлено в очередь — прогресс в блоке «Очередь сборки» ниже. Можно настроить ещё фигуру.","ok");
+    startQueue();
+  }catch(e){ msg("#buildMsg","ошибка постановки в очередь","err"); }
+  finally{ busy($("#btnBuild"),false); }
 };
-async function poll(){
-  const r=await fetch("/api/status/"+S.sid); const j=await r.json();
-  const done=(j.status==="done"||j.status==="error");
-  msg("#buildMsg", j.msg || j.status, j.status==="error"?"err":(done?"ok":"spin"));
-  if(j.status==="done"){
-    busy($("#btnBuild"),false);
-    $("#dl").style.display="block";
-    $("#dlPdf").href=imgURL(j.pdf); $("#dlSvg").style.display = j.svg?"inline-block":"none"; if(j.svg) $("#dlSvg").href=imgURL(j.svg);
-    if(j.png) $("#previewWrap").innerHTML=`<img src="${imgURL(j.png)}">`;  // просто картинка на всю ширину, в хорошем качестве
-    return;
-  }
-  if(j.status==="error"){ busy($("#btnBuild"),false); return; }
-  setTimeout(poll, 3000);
+
+// ---------- Очередь сборки (опрос + отрисовка) ----------
+let qTimer=null;
+function startQueue(){ if(!qTimer){ pollQueue(); qTimer=setInterval(pollQueue, 2500); } }
+function esc(s){ return (s||"").replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function fmtT(s){ s=Math.max(0,Math.round(s||0)); const m=Math.floor(s/60), ss=s%60; return m? `${m} мин ${ss} с` : `${ss} с`; }
+async function pollQueue(){ try{ const r=await fetch("/api/queue"); const j=await r.json(); renderQueue(j.jobs||[]); }catch(e){} }
+function renderQueue(jobs){
+  const sec=$("#queueSec"), list=$("#queueList");
+  if(!jobs.length){ sec.style.display="none"; return; }
+  sec.style.display="block";
+  const active=jobs.filter(j=>j.status==="queued"||j.status==="running").length;
+  $("#qCount").textContent = active? `${active} в работе` : "все готовы";
+  list.innerHTML="";
+  jobs.forEach(j=>{
+    const it=document.createElement("div"); it.className="qitem";
+    let cls="wait", stat="", pct=0, dl="";
+    if(j.status==="queued"){ cls="wait"; stat=`в очереди — ${j.pos}-я · старт через ~${fmtT(j.eta)}`; pct=0; }
+    else if(j.status==="running"){ cls="run"; stat=`идёт ${Math.round((j.progress||0)*100)} % · осталось ~${fmtT(j.eta)}`; pct=(j.progress||0)*100; }
+    else if(j.status==="done"){ cls="done"; stat=`готово · за ${fmtT(j.elapsed)}`; pct=100;
+      dl=`<div class="qdl"><a class="pdf" href="${imgURL(j.pdf)}" download>Скачать PDF</a>${j.svg?`<a class="svg" href="${imgURL(j.svg)}" download>Скачать SVG</a>`:""}</div>`; }
+    else { cls="err"; stat="ошибка: "+esc((j.msg||"").slice(0,180)); }
+    const thumb=j.png;
+    it.innerHTML=
+      (thumb?`<img class="qthumb" src="${imgURL(thumb)}">`:`<div class="qthumb"></div>`)+
+      `<div class="qbody"><div class="qname">${esc(j.name)}</div>`+
+      `<div class="qmeta">${j.size} мм · ${j.n_arms} ${j.n_arms==1?"рука":"руки"}</div>`+
+      `<div class="qstat ${cls}">${stat}</div>`+
+      (j.status!=="error"?`<div class="qbar"><i style="width:${pct}%"></i></div>`:"")+dl+`</div>`;
+    list.appendChild(it);
+  });
 }
+$("#qClear").onclick=async()=>{ await fetch("/api/queue/clear_done",{method:"POST"}); pollQueue(); };
+
+// ---------- Галерея готовых раскладок ----------
+$("#btnGallery").onclick=async()=>{ const w=$("#galWrap");
+  if(w.style.display==="none"){ w.style.display="block"; $("#libWrap").style.display="none"; await loadGallery(); } else w.style.display="none"; };
+async function loadGallery(){
+  const g=$("#galGrid"); g.innerHTML="<p class='hint'>загрузка…</p>";
+  try{ const r=await fetch("/api/builds"); const j=await r.json(); g.innerHTML="";
+    if(!j.items||!j.items.length){ g.innerHTML="<p class='hint'>пока нет готовых раскладок — соберите первую.</p>"; return; }
+    j.items.forEach(it=>{ const c=document.createElement("div"); c.className="libcard";
+      c.innerHTML=`<img src="${imgURL(it.thumb)}" loading="lazy"><div class="nm">${esc(it.name)}</div>`+
+        `<div class="badge">${it.size} мм · ${it.n_arms} ${it.n_arms==1?"рука":"руки"}</div>`+
+        `<div class="dls">${it.pdf?`<a class="pdf" href="${imgURL(it.pdf)}" download>PDF</a>`:""}${it.svg?`<a href="${imgURL(it.svg)}" download>SVG</a>`:""}</div>`;
+      g.appendChild(c); });
+  }catch(e){ g.innerHTML="<p class='msg err'>не удалось загрузить галерею</p>"; }
+}
+startQueue();   // показать очередь, если сборки уже идут
 
 // ---------- утилиты ----------
 // рука -> payload для бэкенда: f=подмышка, blade=хорда (если выбран верх плеча), tip досчитает сервер

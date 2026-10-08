@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1420">
 <title>Раскрой надувных фигур — админка</title>
-<link rel="stylesheet" href="/static/style.css?v=2026c">
+<link rel="stylesheet" href="/static/style.css?v=2026d">
 </head>
 <body>
 <header>
@@ -26,11 +26,16 @@
     <input type="file" id="pdf" accept="application/pdf">
     <button id="btnUpload">Загрузить</button>
     <button id="btnLib" class="back">📁 База макетов</button>
+    <button id="btnGallery" class="back">🖼 Готовые раскладки</button>
     <p class="hint">Векторный PDF макета фигуры (перёд+зад, при наличии — машущая рука).</p>
     <div id="upMsg" class="msg"></div>
     <div id="libWrap" style="display:none">
       <h3>Макеты, прогнанные через инструмент</h3>
       <div id="libGrid" class="libgrid"></div>
+    </div>
+    <div id="galWrap" style="display:none">
+      <h3>Готовые раскладки (имя · размер · руки)</h3>
+      <div id="galGrid" class="libgrid"></div>
     </div>
   </section>
 
@@ -122,21 +127,27 @@
         <p class="hint" id="fpHint" style="display:none">Тащите отрезок вверх/вниз по контуру — так двигается отверстие для руки. «Применить» сдвинет отверстие при сборке.</p>
       </div>
     </div>
-    <button id="btnBuild">Собрать раскладку</button>
+    <button id="btnBuild">➕ Поставить в очередь на сборку</button>
     <div id="buildMsg" class="msg"></div>
-    <div id="dl" style="display:none">
-      <a id="dlPdf" class="dlbtn" download>Скачать PDF</a>
-      <a id="dlSvg" class="dlbtn" download>Скачать SVG</a>
-    </div>
-    <div id="previewWrap"></div>
+    <p class="hint">Сборка встанет в очередь и пойдёт по очереди. Можно вернуться и настроить ещё фигуру — тоже добавится в очередь. Прогресс и скачивание — в блоке «Очередь сборки» ниже.</p>
     <div class="nav">
       <button id="editArm">↩ переделать рез руки</button>
       <button id="editHand">↩ переделать кисть/предплечье</button>
       <button class="back" data-to="2">← изменить параметры</button>
+      <button class="back" data-to="1">+ новая фигура</button>
     </div>
   </section>
 </main>
 
-<script src="/static/app.js?v=2026c"></script>
+<div id="queueSec" style="display:none">
+  <div class="card">
+    <h2>Очередь сборки <span id="qCount" class="qcount"></span></h2>
+    <p class="hint">Сборки идут ПО ОДНОЙ (чтобы не перегружать сервер). Добавляйте ещё, пока идёт текущая.</p>
+    <div id="queueList"></div>
+    <button id="qClear" class="back">очистить завершённые</button>
+  </div>
+</div>
+
+<script src="/static/app.js?v=2026d"></script>
 </body>
 </html>
