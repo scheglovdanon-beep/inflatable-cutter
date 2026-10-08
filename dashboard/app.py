@@ -98,11 +98,11 @@ def _build_cfg(size, n_arms, arms_identical, arms):
         cfg["expected_arms"] = 0
         cfg.pop("manual_arms", None)
         return cfg
+    # НЕ трогаем make_appendages/make_hand (в базовом cosmo-конфиге они false — рука/кисть строятся
+    # из ВЫРЕЗАННОГО куска через arm_template+build_arm_from_poly, а не старым get_arm_contour).
     cfg["arm_cut"] = "armpit"
     cfg["expected_arms"] = int(n_arms)
-    cfg["make_appendages"] = True
-    cfg["make_hand"] = True
-    cfg["arm_template"] = True
+    cfg.setdefault("arm_template", True)
     cfg["arms_identical"] = bool(arms_identical)
     man = []
     for a in arms:
@@ -130,6 +130,89 @@ def _render_page_png(pdf_path, out_png, max_px=1600):
     pix.save(out_png)
     return {"w": pix.width, "h": pix.height, "zoom": zoom,
             "ox": float(r.x0), "oy": float(r.y0)}                      # PT = px/zoom + ox/oy
+
+
+def _root_candidates(poly_pt, N=12):
+    """Нумерованные ВОГНУТЫЕ углы контура (подмышки/верх плеча/впадины) — как _dbg_cand.py.
+    Растрируем полигон, approxPolyDP, берём вогнутые углы, NMS по 40pt, сортировка по остроте.
+    Возвращает [(x,y,angle)...] в PT (индекс в списке = номер на картинке)."""
+    import numpy as np, cv2, math
+    from PIL import Image, ImageDraw
+    b = poly_pt.bounds; Z = 2.0; pad = 8
+    W = int((b[2] - b[0]) * Z) + 2 * pad; H = int((b[3] - b[1]) * Z) + 2 * pad
+    im = Image.new("L", (W, H), 0); dr = ImageDraw.Draw(im)
+    dr.polygon([((x - b[0]) * Z + pad, (y - b[1]) * Z + pad) for x, y in poly_pt.exterior.coords], fill=255)
+    cnts, _ = cv2.findContours(np.array(im, np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return []
+    c = cv2.approxPolyDP(max(cnts, key=cv2.contourArea), 2.0, True)
+    P = np.array([((p[0][0] - pad) / Z + b[0], (p[0][1] - pad) / Z + b[1]) for p in c])
+    n = len(P)
+    if n < 3:
+        return []
+    area = sum(P[i][0] * P[(i + 1) % n][1] - P[(i + 1) % n][0] * P[i][1] for i in range(n))
+    orient = 1 if area > 0 else -1
+    L = 18.0
+
+    def ptat(i, step):
+        acc = 0.0; j = i
+        while acc < L:
+            nj = (j + step) % n; acc += float(np.hypot(*(P[nj] - P[j]))); j = nj
+            if j == i:
+                break
+        return P[j]
+    cand = []
+    for i in range(n):
+        pa = ptat(i, -1); pb = P[i]; pc = ptat(i, 1)
+        e1 = pb - pa; e2 = pc - pb
+        cr = e1[0] * e2[1] - e1[1] * e2[0]
+        if cr * orient >= 0:                                          # выпуклый угол — пропускаем (нужны вогнутые)
+            continue
+        ang = math.degrees(math.atan2(abs(cr), float(np.dot(e1, e2))))
+        cand.append((float(pb[0]), float(pb[1]), ang))
+    cand.sort(key=lambda t: -t[2]); keep = []
+    for x, y, a in cand:
+        if all(np.hypot(x - kx, y - ky) > 40 for kx, ky, _ in keep):
+            keep.append((x, y, a))
+        if len(keep) >= N:
+            break
+    return keep
+
+
+def _auto_tip(poly_pt, f):
+    """Кончик кисти = самая ДАЛЬНЯЯ точка контура от подмышки f (в PT)."""
+    import numpy as np
+    exr = np.asarray(poly_pt.exterior.coords, float)
+    d = np.hypot(exr[:, 0] - f[0], exr[:, 1] - f[1])
+    p = exr[int(d.argmax())]
+    return [float(p[0]), float(p[1])]
+
+
+def _fill_tips(d, size, arms):
+    """Досчитать tip тем рукам, у кого он не задан. tip = кончик кисти от БЛИЖАЙШЕЙ задетектированной
+    руки (detect_armpits даёт корректный кончик); fallback — самая дальняя точка контура от f."""
+    if all(a.get("tip") for a in arms):
+        return arms
+    import numpy as np
+    from sides import get_front_figure
+    from arm import detect_armpits
+    cfg = _base_cfg(size); cfg["arm_cut"] = "armpit"; cfg["expected_arms"] = len(arms)
+    page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
+    fig = get_front_figure(page, cfg)
+    try:
+        det = detect_armpits(fig.contour_pt, cfg)
+    except Exception:
+        det = []
+    for a in arms:
+        if a.get("tip") or not a.get("f"):
+            continue
+        f = np.asarray(a["f"], float)
+        if det:
+            best = min(det, key=lambda da: float(np.hypot(da["f"][0] - f[0], da["f"][1] - f[1])))
+            a["tip"] = [float(best["tip"][0]), float(best["tip"][1])]
+        else:
+            a["tip"] = _auto_tip(fig.contour_pt, a["f"])
+    return arms
 
 
 # ---------- маршруты ----------
@@ -213,6 +296,25 @@ def detect():
     return jsonify(arms=out, count=len(out))
 
 
+@app.route("/api/candidates", methods=["POST"])
+def candidates():
+    """Нумерованные кандидатные точки (вогнутые углы) контура переда — для выбора подмышки/верха
+    плеча по НОМЕРУ. Возвращает [{i,x,y}] в PT (как _dbg_cand.py)."""
+    data = request.get_json(force=True)
+    d = _sdir(data["sid"])
+    size = data.get("size", "2700")
+    try:
+        from sides import get_front_figure
+        cfg = _base_cfg(size); cfg["arm_cut"] = "none"
+        page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
+        fig = get_front_figure(page, cfg)
+        keep = _root_candidates(fig.contour_pt, int(data.get("n", 12)))
+    except Exception as e:
+        return jsonify(error=f"кандидаты не найдены: {e}", pts=[]), 200
+    pts = [{"i": i, "x": float(x), "y": float(y)} for i, (x, y, a) in enumerate(keep)]
+    return jsonify(pts=pts, count=len(pts))
+
+
 @app.route("/api/arm_preview", methods=["POST"])
 def arm_preview():
     """Прогнать рез рук (cut_waving_arms) по выбранным точкам. Вернуть bbox каждой руки +
@@ -225,6 +327,7 @@ def arm_preview():
     try:
         from sides import get_front_figure
         from arm import cut_waving_arms
+        arms = _fill_tips(d, size, arms)                              # авто-кончик, если не задан
         cfg = _build_cfg(size, len(arms), False, arms)
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]
         page._cfg = cfg
@@ -290,9 +393,12 @@ def _run_build(sid, cfg, want_svg):
 def build():
     data = request.get_json(force=True)
     sid = data["sid"]
-    _sdir(sid)
-    cfg = _build_cfg(data.get("size", "2700"), data.get("n_arms", 0),
-                     data.get("arms_identical", False), data.get("arms", []))
+    d = _sdir(sid)
+    size = data.get("size", "2700")
+    arms = data.get("arms", [])
+    if int(data.get("n_arms", 0)) > 0:
+        arms = _fill_tips(d, size, arms)                              # авто-кончик, если не задан
+    cfg = _build_cfg(size, data.get("n_arms", 0), data.get("arms_identical", False), arms)
     JOBS[sid] = {"status": "queued", "msg": "в очереди", "pdf": None, "svg": None, "png": None}
     threading.Thread(target=_run_build, args=(sid, cfg, bool(data.get("svg", True))), daemon=True).start()
     return jsonify(sid=sid, status="queued")

@@ -58,69 +58,64 @@ $("#btnUpload").onclick = async () => {
 $("#narms").onchange = () => { $("#identWrap").style.display = $("#narms").value==="2" ? "inline-block":"none"; };
 $("#toS3").onclick = async () => {
   S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked;
-  S.arms=Array.from({length:S.n},()=>({f:null,tip:null,blade:[],wrist:[],elbow:[],vertical:false}));
-  S.cur=0;
+  S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
+  S.cur=0; S.cands=null;
   if(S.n===0){ show(5); return; }
-  show(3); msg("#s3msg","определяю точки реза (авто)…","");
+  show(3); msg("#s3msg","ищу кандидатные точки…","");
   try {
-    const r=await fetch("/api/detect",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({sid:S.sid,size:S.size,n_arms:S.n})});
+    const r=await fetch("/api/candidates",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({sid:S.sid,size:S.size})});
     const j=await r.json();
-    if(j.arms && j.arms.length){
-      j.arms.forEach((a,i)=>{ if(i<S.n){ S.arms[i].f=a.f; S.arms[i].tip=a.tip; if(a.blade) S.arms[i].blade=a.blade.map(p=>p.slice()); }});
-      msg("#s3msg",`предложено авто: ${j.arms.length} шт. Поправьте точки кликом или смените режим реза.`,"ok");
-    } else { msg("#s3msg","авто-детект не нашёл руку — отметьте точки вручную.",""); }
-  } catch(e){ msg("#s3msg","авто-детект недоступен — вручную.",""); }
+    S.cands = j.pts || [];
+    if(S.cands.length){ msg("#s3msg",`найдено ${S.cands.length} точек. Выберите подмышку (и верх плеча для хорды).`,"ok"); }
+    else { msg("#s3msg","кандидаты не найдены — попробуйте другой размер/макет.","err"); }
+  } catch(e){ msg("#s3msg","не удалось получить кандидатов.","err"); S.cands=[]; }
   startCut();
 };
 document.querySelectorAll(".back").forEach(b=> b.onclick=()=>show(parseInt(b.dataset.to)));
 
-// ---------- ШАГ 3: рез руки ----------
+// ---------- ШАГ 3: рез руки (выбор точек по НОМЕРАМ) ----------
 const pick3 = new Picker($("#cv3"));
-let slots3=[];                                   // текущая последовательность слотов
+function cand(i){ return (S.cands||[]).find(c=>c.i===i); }        // кандидат по номеру -> {i,x,y} PT
 function startCut(){
   show(3);
   $("#armLabel").textContent = S.n>1 ? `(рука ${S.cur+1} из ${S.n})` : "";
-  // радио отражает режим текущей руки
-  document.querySelector(`input[name=cutmode][value=${S.arms[S.cur].vertical?"vertical":"chord"}]`).checked=true;
-  rebuildSlots3();
+  fillSelects(); updPrompt3();
   pick3.load(S.meta.img, S.meta, ov3, onPick3);
 }
-function rebuildSlots3(){
-  slots3 = S.arms[S.cur].vertical ? ["f","tip"] : ["f","tip","blade0","blade1"];
-  renderList("#pickList", slots3, slotLabel, slotFilled3);
-  updPrompt3();
+function fillSelects(){
+  const a=S.arms[S.cur];
+  const fill=(sel,ph)=>{ const el=$(sel); el.innerHTML="";
+    const o0=document.createElement("option"); o0.value=""; o0.textContent=ph; el.appendChild(o0);
+    (S.cands||[]).forEach(c=>{ const o=document.createElement("option"); o.value=c.i; o.textContent="№ "+c.i; el.appendChild(o); }); };
+  fill("#selArmpit","—"); fill("#selShoulder","— (вертикальный рез)");
+  $("#selArmpit").value = a.armpit!=null ? a.armpit : "";
+  $("#selShoulder").value = a.shoulder!=null ? a.shoulder : "";
 }
-function slotLabel(s){ return {f:"корень руки (у подмышки)", tip:"кончик кисти",
-  blade0:"хорда реза — точка 1", blade1:"хорда реза — точка 2",
-  wrist0:"запястье — точка 1", wrist1:"запястье — точка 2",
-  elbow0:"локоть — точка 1", elbow1:"локоть — точка 2"}[s]; }
-function slotFilled3(s){ const a=S.arms[S.cur];
-  if(s==="f") return !!a.f; if(s==="tip") return !!a.tip;
-  if(s==="blade0") return a.blade.length>=1; if(s==="blade1") return a.blade.length>=2; return false; }
-function nextSlot3(){ return slots3.find(s=>!slotFilled3(s)); }
-function updPrompt3(){ const n=nextSlot3();
-  $("#prompt3").textContent = n ? "Кликните: "+slotLabel(n) : "Все точки заданы — подтвердите руку.";
-  markActive("#pickList", slots3, slotFilled3, n); }
-function onPick3(pt){ const a=S.arms[S.cur]; const n=nextSlot3(); if(!n) return;
-  if(n==="f") a.f=pt; else if(n==="tip") a.tip=pt; else a.blade.push(pt);
-  pick3.draw(); updPrompt3(); }
-function ov3(p){ const a=S.arms[S.cur];
-  if(a.f) p.dot(a.f,"#e4002b","корень");
-  if(a.tip) p.dot(a.tip,"#1560ff","кончик");
-  if(!a.vertical){
-    if(a.blade[0]) p.dot(a.blade[0],"#ff8c00");
-    if(a.blade[1]){ p.dot(a.blade[1],"#ff8c00"); p.line(a.blade[0],a.blade[1],"#ff8c00"); } } }
-document.querySelectorAll("input[name=cutmode]").forEach(r=> r.onchange=()=>{ S.arms[S.cur].vertical=(r.value==="vertical"); rebuildSlots3(); pick3.draw(); });
-$("#undo3").onclick=()=>{ const a=S.arms[S.cur];
-  if(!a.vertical && a.blade.length){ a.blade.pop(); } else if(a.tip){ a.tip=null; } else if(a.f){ a.f=null; }
-  pick3.draw(); updPrompt3(); };
+$("#selArmpit").onchange = ()=>{ const v=$("#selArmpit").value; S.arms[S.cur].armpit = v===""?null:parseInt(v); pick3.draw(); updPrompt3(); };
+$("#selShoulder").onchange = ()=>{ const v=$("#selShoulder").value; S.arms[S.cur].shoulder = v===""?null:parseInt(v); pick3.draw(); updPrompt3(); };
+function updPrompt3(){ const a=S.arms[S.cur];
+  $("#prompt3").textContent = a.armpit==null ? "Выберите № точки подмышки (в списке или кликом по точке)."
+    : (a.shoulder==null ? `Подмышка №${a.armpit} → вертикальный рез. Для хорды выберите верх плеча.`
+       : `Хорда: подмышка №${a.armpit} ↔ верх плеча №${a.shoulder}.`); }
+// клик по макету = выбрать ближайший кандидат (1-й -> подмышка, 2-й -> верх плеча, 3-й -> сброс)
+function onPick3(pt){ if(!S.cands||!S.cands.length) return;
+  let best=null,bd=1e18; S.cands.forEach(c=>{ const dd=Math.hypot(c.x-pt[0],c.y-pt[1]); if(dd<bd){bd=dd;best=c;} });
+  if(!best) return; const a=S.arms[S.cur];
+  if(a.armpit==null) a.armpit=best.i;
+  else if(a.shoulder==null && best.i!==a.armpit) a.shoulder=best.i;
+  else { a.armpit=best.i; a.shoulder=null; }
+  fillSelects(); pick3.draw(); updPrompt3(); }
+function ov3(p){
+  (S.cands||[]).forEach(c=> p.dot([c.x,c.y], "#ffd000", String(c.i)));   // все кандидаты — жёлтые с номером
+  const a=S.arms[S.cur]; const c0=cand(a.armpit), c1=cand(a.shoulder);
+  if(c0) p.dot([c0.x,c0.y],"#e4002b","подмышка");
+  if(c1) p.dot([c1.x,c1.y],"#ff8c00","верх плеча");
+  if(c0&&c1) p.line([c0.x,c0.y],[c1.x,c1.y],"#ff8c00"); }
 $("#armNext").onclick=async()=>{ const a=S.arms[S.cur];
-  if(!a.f||!a.tip){ msg("#s3msg","нужны корень и кончик","err"); return; }
-  if(!a.vertical && a.blade.length<2){ msg("#s3msg","нужны 2 точки хорды","err"); return; }
+  if(a.armpit==null){ msg("#s3msg","выберите № точки подмышки","err"); return; }
   msg("#s3msg","","");
   if(S.cur < S.n-1){ S.cur++; startCut(); return; }
-  // все руки размечены -> прогнать рез и перейти к запястью/локтю
   msg("#s3msg","проверяю рез…","");
   const r=await fetch("/api/arm_preview",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({sid:S.sid,size:S.size,arms:S.arms.map(armPayload)})});
@@ -132,6 +127,8 @@ $("#armNext").onclick=async()=>{ const a=S.arms[S.cur];
 // ---------- ШАГ 4: запястье/локоть ----------
 const pick4 = new Picker($("#cv4"));
 const slots4=["wrist0","wrist1","elbow0","elbow1"];
+function slotLabel(s){ return {wrist0:"запястье — точка 1", wrist1:"запястье — точка 2",
+  elbow0:"локоть — точка 1", elbow1:"локоть — точка 2"}[s]; }
 function startHand(){
   show(4);
   $("#armLabel4").textContent = S.n>1 ? `(рука ${S.cur+1} из ${S.n})` : "";
@@ -156,19 +153,18 @@ function ov4(p){ const a=S.arms[S.cur];
 $("#undo4").onclick=()=>{ const a=S.arms[S.cur];
   if(a.elbow.length){ a.elbow.pop(); } else if(a.wrist.length){ a.wrist.pop(); }
   pick4.draw(); updPrompt4(); };
+function s4done(){ msg("#s4msg","",""); if(S.cur < S.n-1){ S.cur++; startHand(); } else show(5); }
 $("#armNext4").onclick=()=>{ const a=S.arms[S.cur];
-  if(a.wrist.length<2||a.elbow.length<2){ msg("#s4msg","нужны по 2 точки на запястье и локоть","err"); return; }
-  msg("#s4msg","","");
-  if(S.cur < S.n-1){ S.cur++; startHand(); return; }
-  show(5);
-};
+  if(a.wrist.length<2||a.elbow.length<2){ msg("#s4msg","нужны по 2 точки на запястье и локоть (или «пропустить»)","err"); return; }
+  s4done(); };
+$("#skip4").onclick=()=>{ const a=S.arms[S.cur]; a.wrist=[]; a.elbow=[]; s4done(); };   // авто-детект запястья/локтя
 
 // ---------- ШАГ 5: сборка ----------
 $("#btnBuild").onclick=async()=>{
   $("#dl").style.display="none"; $("#previewWrap").innerHTML="";
   msg("#buildMsg","запускаю сборку (2–5 мин)…","");
   const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,
-    arms:S.arms.map(a=>({...armPayload(a),wrist:a.wrist.length===2?a.wrist:undefined,elbow:a.elbow.length===2?a.elbow:undefined}))};
+    arms:S.arms.map(armPayload)};
   const r=await fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); return; }
   poll();
@@ -187,7 +183,9 @@ async function poll(){
 }
 
 // ---------- утилиты ----------
-function armPayload(a){ const o={f:a.f,tip:a.tip}; if(!a.vertical && a.blade&&a.blade.length===2) o.blade=a.blade;
+// рука -> payload для бэкенда: f=подмышка, blade=хорда (если выбран верх плеча), tip досчитает сервер
+function armPayload(a){ const c0=cand(a.armpit); const o={f:[c0.x,c0.y]};
+  if(a.shoulder!=null){ const c1=cand(a.shoulder); if(c1) o.blade=[[c0.x,c0.y],[c1.x,c1.y]]; }
   if(a.wrist&&a.wrist.length===2) o.wrist=a.wrist; if(a.elbow&&a.elbow.length===2) o.elbow=a.elbow; return o; }
 function renderList(sel, slots, lab, filled){ const ol=$(sel); ol.innerHTML="";
   slots.forEach(s=>{ const li=document.createElement("li"); li.textContent=lab(s); li.dataset.slot=s;

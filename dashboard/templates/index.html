@@ -52,17 +52,17 @@
     <div class="nav"><button class="back" data-to="1">← назад</button><button id="toS3">далее →</button></div>
   </section>
 
-  <!-- ШАГ 3: рез руки -->
+  <!-- ШАГ 3: рез руки (выбор точек по номерам) -->
   <section id="s3" class="panel">
     <h2>Рез руки <span id="armLabel"></span></h2>
     <div class="row">
       <div class="controls">
-        <p>Режим реза:</p>
-        <label><input type="radio" name="cutmode" value="chord" checked> хорда (2 точки у корня)</label><br>
-        <label><input type="radio" name="cutmode" value="vertical"> вертикальный (0 точек, рез вверх от корня)</label>
-        <ol id="pickList"></ol>
+        <p>На макете пронумерованы предложенные точки (вогнутые углы). Выберите по номеру:</p>
+        <label>Подмышка (корень): <select id="selArmpit"><option value="">—</option></select></label><br>
+        <label>Верх плеча: <select id="selShoulder"><option value="">— (вертикальный рез)</option></select></label>
+        <p class="hint">Верх плеча не выбран → рез <b>вертикальный</b> (1 точка от подмышки).
+          Выбран → рез по <b>хорде</b> подмышка↔верх плеча (2 точки). Кончик кисти определяется авто.</p>
         <p class="prompt" id="prompt3"></p>
-        <button id="undo3">← убрать точку</button>
         <button id="armNext">подтвердить руку →</button>
         <div id="s3msg" class="msg"></div>
       </div>
@@ -81,7 +81,9 @@
         <p class="prompt" id="prompt4"></p>
         <button id="undo4">← убрать точку</button>
         <button id="armNext4">подтвердить руку →</button>
-        <p class="hint">Запястье — 2 точки (хорда реза кисти), локоть — 2 точки (хорда предплечья).</p>
+        <button id="skip4" class="back">пропустить (авто-детект)</button>
+        <p class="hint">Запястье — 2 точки (хорда реза кисти), локоть — 2 точки (хорда предплечья).
+          Можно пропустить — тогда запястье/локоть определятся автоматически.</p>
         <div id="s4msg" class="msg"></div>
       </div>
       <div class="canvaswrap"><canvas id="cv4"></canvas></div>
