@@ -187,9 +187,7 @@ async function loadFrontPreview(){
     const j=await r.json();
     if(!r.ok){ msg("#frontPrevMsg",j.error||"не удалось","err"); return; }
     msg("#frontPrevMsg",`цветом — где ляжет рука (${j.arms} шт., длина = Ø${j.hole_mm} мм отверстия)`,"ok");
-    FP.data=j; FP.segs=j.segments.map(s=>s.slice());
-    FP.orig=j.segments.map((s,i)=>{ const a=fpAnchor(s); const hd=(S.arms[i]&&S.arms[i].holeDy)||0;
-      return [a[0], a[1]-hd/j.mm_per_px]; });        // дефолтный (несдвинутый) якорь для абсолютного сдвига
+    FP.data=j; fpInitGeom();
     const im=new Image();
     im.onload=()=>{ FP.img=im; FP.scale=Math.min(1,880/j.W);
       FP.cv.width=Math.round(j.W*FP.scale); FP.cv.height=Math.round(j.H*FP.scale);
@@ -199,36 +197,62 @@ async function loadFrontPreview(){
     im.src=imgURL(j.img);
   }catch(e){ msg("#frontPrevMsg","ошибка превью переда","err"); }
 }
-function fpAnchor(seg){ return seg.reduce((a,p)=>p[1]>a[1]?p:a, seg[0]); }   // нижняя точка отрезка (= подмышка)
+// ---- геометрия контура (длина по дуге) для перетаскивания отрезка ----
+function fpInitGeom(){ const C=FP.data.contour; FP.cum=[0];
+  for(let i=1;i<C.length;i++) FP.cum[i]=FP.cum[i-1]+Math.hypot(C[i][0]-C[i-1][0],C[i][1]-C[i-1][1]);
+  FP.total=FP.cum[C.length-1]||1; FP.Lp=FP.data.seg_len_px;
+  FP.s0=[]; FP.s0def=[]; FP.dir=[]; FP.origY=[];
+  FP.data.segments.forEach((seg,i)=>{
+    const a=seg.reduce((m,p)=>p[1]>m[1]?p:m, seg[0]);            // нижняя точка (подмышка)
+    const sa=fpProj(a[0],a[1]);
+    FP.dir[i]=(fpAt(sa+6)[1] < fpAt(sa-6)[1]) ? 1 : -1;          // направление «вверх» по дуге (меньший y)
+    FP.s0[i]=sa;
+    const hd=(S.arms[i]&&S.arms[i].holeDy)||0;
+    FP.origY[i]=a[1]-hd/FP.data.mm_per_px;                       // дефолтный y якоря
+    FP.s0def[i]=fpProj(a[0],FP.origY[i]);                        // дефолтная позиция (для сброса)
+  });
+  fpRebuild();
+}
+function fpAt(t){ const C=FP.data.contour,cum=FP.cum; t=Math.max(0,Math.min(FP.total,t));
+  let i=1; while(i<cum.length && cum[i]<t) i++; const i0=i-1,i1=Math.min(i,C.length-1);
+  const sl=(cum[i1]-cum[i0])||1, f=(t-cum[i0])/sl;
+  return [C[i0][0]+(C[i1][0]-C[i0][0])*f, C[i0][1]+(C[i1][1]-C[i0][1])*f]; }
+function fpProj(x,y){ const C=FP.data.contour,cum=FP.cum; let bt=0,bd=1e18;  // проекция точки на контур -> дуга
+  for(let i=0;i<C.length-1;i++){ const ax=C[i][0],ay=C[i][1],dx=C[i+1][0]-ax,dy=C[i+1][1]-ay,L2=(dx*dx+dy*dy)||1;
+    let u=((x-ax)*dx+(y-ay)*dy)/L2; u=Math.max(0,Math.min(1,u)); const px=ax+dx*u,py=ay+dy*u,dd=(px-x)**2+(py-y)**2;
+    if(dd<bd){bd=dd; bt=cum[i]+Math.sqrt(L2)*u;} } return bt; }
+function fpSub(s0,dir){ const C=FP.data.contour,cum=FP.cum;         // отрезок ФИКС. длины Lp по дуге от s0
+  const s1=Math.max(0,Math.min(FP.total, s0+dir*FP.Lp));
+  const lo=Math.min(s0,s1), hi=Math.max(s0,s1); const pts=[fpAt(lo)];
+  for(let i=0;i<C.length;i++){ if(cum[i]>lo+0.5 && cum[i]<hi-0.5) pts.push(C[i].slice()); }
+  pts.push(fpAt(hi)); return pts; }
+function fpRebuild(){ FP.segs=FP.s0.map((s0,i)=>fpSub(s0,FP.dir[i])); fpDraw(); }
 function fpDraw(){ const c=FP.ctx, s=FP.scale; if(!FP.img) return;
   c.clearRect(0,0,FP.cv.width,FP.cv.height); c.drawImage(FP.img,0,0,FP.cv.width,FP.cv.height);
-  FP.segs.forEach((seg,i)=>{ c.strokeStyle=FP.cols[i%4]; c.lineWidth=9; c.lineCap="round"; c.lineJoin="round";
+  FP.segs.forEach((seg,i)=>{ c.strokeStyle=FP.cols[i%4]; c.lineWidth=10; c.lineCap="round"; c.lineJoin="round";
     c.beginPath(); seg.forEach((p,k)=>{ const x=p[0]*s,y=p[1]*s; k?c.lineTo(x,y):c.moveTo(x,y); }); c.stroke();
-    const a=fpAnchor(seg); c.fillStyle=FP.cols[i%4]; c.beginPath(); c.arc(a[0]*s,a[1]*s,7,0,7); c.fill();
-    c.fillStyle="#000"; c.font="bold 13px sans-serif"; c.fillText("рука "+(i+1), a[0]*s+10, a[1]*s-10); });
-}
-// построить отрезок по контуру от якоря вверх на длину seg_len_px
-function fpSegFromAnchor(ax,ay){ const C=FP.data.contour, n=C.length, Lp=FP.data.seg_len_px;
-  let bi=0,bd=1e18; C.forEach((p,i)=>{const dd=(p[0]-ax)**2+(p[1]-ay)**2; if(dd<bd){bd=dd;bi=i;}});
-  const up=(C[(bi+1)%n][1] < C[(bi-1+n)%n][1]) ? 1 : -1;      // направление к макушке (меньший y)
-  let pts=[C[bi].slice()], acc=0, i=bi;
-  while(acc<Lp){ const jn=(i+up+n)%n; acc+=Math.hypot(C[jn][0]-C[i][0],C[jn][1]-C[i][1]); pts.push(C[jn].slice()); i=jn; if(i===bi)break; }
-  return pts;
+    const a=fpAt(FP.s0[i]); c.fillStyle="#000"; c.font="bold 13px sans-serif"; c.fillText("рука "+(i+1), a[0]*s+10, a[1]*s-8); });
 }
 function fpXY(e){ const r=FP.cv.getBoundingClientRect();
   return [ (e.clientX-r.left)*(FP.cv.width/r.width)/FP.scale, (e.clientY-r.top)*(FP.cv.height/r.height)/FP.scale ]; }
-FP.cv.addEventListener("pointerdown", e=>{ if(!FP.editing) return; const [x,y]=fpXY(e);
-  let bi=-1,bd=1e18; FP.segs.forEach((seg,i)=>{ const a=fpAnchor(seg); const dd=(a[0]-x)**2+(a[1]-y)**2; if(dd<bd){bd=dd;bi=i;} });
-  if(bi>=0 && bd < (40/FP.scale)**2){ FP.drag=bi; FP.cv.setPointerCapture(e.pointerId); } });
+function fpDistToSeg(x,y,seg){ let bd=1e18;
+  for(let i=0;i<seg.length-1;i++){ const ax=seg[i][0],ay=seg[i][1],dx=seg[i+1][0]-ax,dy=seg[i+1][1]-ay,L2=(dx*dx+dy*dy)||1;
+    let u=((x-ax)*dx+(y-ay)*dy)/L2; u=Math.max(0,Math.min(1,u)); const px=ax+dx*u,py=ay+dy*u;
+    bd=Math.min(bd,(px-x)**2+(py-y)**2); } return Math.sqrt(bd); }
+FP.cv.addEventListener("pointerdown", e=>{ if(!FP.editing) return; const [x,y]=fpXY(e);   // хват за ЛЮБУЮ часть отрезка
+  let bi=-1,bd=1e18; FP.segs.forEach((seg,i)=>{ const dd=fpDistToSeg(x,y,seg); if(dd<bd){bd=dd;bi=i;} });
+  if(bi>=0 && bd < 26/FP.scale){ FP.drag=bi; FP.grabArc=fpProj(x,y); FP.grabS0=FP.s0[bi]; FP.cv.setPointerCapture(e.pointerId); } });
 FP.cv.addEventListener("pointermove", e=>{ if(FP.drag<0) return; const [x,y]=fpXY(e);
-  FP.segs[FP.drag]=fpSegFromAnchor(x,y); fpDraw(); });
+  let s0=FP.grabS0+(fpProj(x,y)-FP.grabArc);
+  s0=Math.max(FP.Lp, Math.min(FP.total-FP.Lp, s0));            // не уезжать за край контура
+  FP.s0[FP.drag]=s0; FP.segs[FP.drag]=fpSub(s0,FP.dir[FP.drag]); fpDraw(); });
 FP.cv.addEventListener("pointerup", ()=>{ FP.drag=-1; });
+FP.cv.addEventListener("pointercancel", ()=>{ FP.drag=-1; });
 $("#fpEdit").onclick=()=>{ FP.editing=true; $("#fpApply").style.display="inline-flex";
   $("#fpReset").style.display="inline-flex"; $("#fpHint").style.display="block"; FP.cv.style.cursor="grab"; };
-$("#fpReset").onclick=()=>{ FP.segs=FP.data.segments.map(s=>s.slice()); S.arms.forEach(a=>a.holeDy=0); fpDraw(); };
+$("#fpReset").onclick=()=>{ FP.s0=FP.s0def.slice(); S.arms.forEach(a=>a.holeDy=0); fpRebuild(); };
 $("#fpApply").onclick=()=>{
-  FP.segs.forEach((seg,i)=>{ const dy=(fpAnchor(seg)[1]-FP.orig[i][1])*FP.data.mm_per_px;
-    if(S.arms[i]) S.arms[i].holeDy=dy; });
+  FP.s0.forEach((s0,i)=>{ const dy=(fpAt(s0)[1]-FP.origY[i])*FP.data.mm_per_px; if(S.arms[i]) S.arms[i].holeDy=dy; });
   FP.editing=false; FP.cv.style.cursor="default"; $("#fpHint").style.display="none";
   const ds=S.arms.map(a=>Math.round(a.holeDy||0));
   msg("#frontPrevMsg",`сдвиг отверстия применён: ${ds.map((v,i)=>`рука ${i+1} ${v>0?"+":""}${v}мм`).join(", ")} — учтётся при сборке`,"ok");
@@ -286,10 +310,11 @@ function makeZoomable(container, url){
   let fit=1, scale=1, tx=0, ty=0, natW=0, natH=0;
   const apply=()=>{ img.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`; };
   function center(){ const r=vp.getBoundingClientRect();
-    fit=Math.min(r.width/natW, r.height/natH)||1; scale=fit;
-    tx=(r.width-natW*fit)/2; ty=(r.height-natH*fit)/2; apply(); }
+    fit=(r.width/natW)||1; scale=fit;                               // 100% ширины окна (нельзя отдалить ниже)
+    tx=0; ty=Math.min(0,(r.height-natH*fit)/2); apply(); }
   function zoomAt(cx,cy,f){ const r=vp.getBoundingClientRect(); const x=cx-r.left, y=cy-r.top;
-    const ns=Math.min(fit*20, Math.max(fit, scale*f)); tx=x-(x-tx)*(ns/scale); ty=y-(y-ty)*(ns/scale); scale=ns; apply(); }
+    const ns=Math.min(fit*3, Math.max(fit, scale*f));               // приближение максимум 3×, отдалить не ниже 100%
+    tx=x-(x-tx)*(ns/scale); ty=y-(y-ty)*(ns/scale); scale=ns; apply(); }
   img.onload=()=>{ natW=img.naturalWidth; natH=img.naturalHeight; center(); };
   img.src=url;
   vp.addEventListener("wheel",e=>{ e.preventDefault(); zoomAt(e.clientX,e.clientY, e.deltaY<0?1.2:1/1.2); },{passive:false});

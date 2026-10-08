@@ -146,14 +146,12 @@ def _save_library(sid, pdf_path, page_png, name):
 
 
 def _render_page_png(pdf_path, out_png, max_px=1600):
-    from export_pdf_grouped import _bg_fill_colors, _pix_png_nobg
+    # Фон НЕ убираем: на выборе точек реза с серым фоном смотреть удобнее (по просьбе).
     page = pymupdf.open(pdf_path)[0]
     r = page.rect
     zoom = min(2.0, max_px / max(r.width, r.height))                   # кап по длинной стороне (лёгкая картинка для моб.)
-    pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=True)
-    png = _pix_png_nobg(pix, _bg_fill_colors(page, {}))                # убрать фон макета уже на выборе точек реза
-    with open(out_png, "wb") as f:
-        f.write(png)
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
+    pix.save(out_png)
     return {"w": pix.width, "h": pix.height, "zoom": zoom,
             "ox": float(r.x0), "oy": float(r.y0)}                      # PT = px/zoom + ox/oy
 
