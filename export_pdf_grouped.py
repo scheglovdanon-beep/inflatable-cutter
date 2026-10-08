@@ -157,6 +157,30 @@ def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0):
             f'xlink:href="data:image/png;base64,{png}"/>')
 
 
+def _vtiles(poly, max_w, seam_mm):
+    """РЕЗ панели (перёд/зад) на вертикальные полосы под печатный холст max_w (1440). Если ширина
+    W>max_w -> N=ceil(W/max_w) РАВНЫХ полос на всю высоту (высота уходит вдоль рулона — там без
+    ограничений), рез строго вертикальный встык. Каждая полоса = (контур ∩ полоса, +припуск seam
+    по всем краям вкл. линию реза). Возвращает [(tile_poly, tile_seam)...] или None если резать не надо."""
+    from shapely.geometry import box as _bx
+    x0, y0, x1, y1 = poly.bounds; Wp = x1 - x0
+    if Wp <= max_w + 1e-6:
+        return None
+    N = int(-(-Wp // max_w)); tw = Wp / N                              # ceil(W/max_w) равных полос
+    tiles = []
+    for k in range(N):
+        band = _bx(x0 + k * tw, y0 - 1, x0 + (k + 1) * tw, y1 + 1)     # вертикальная полоса (встык, без нахлёста)
+        tp = poly.intersection(band)
+        if tp.is_empty:
+            continue
+        if tp.geom_type != "Polygon":                                 # взять крупнейший кусок (на случай вогнутостей)
+            tp = max((g for g in tp.geoms if g.geom_type == "Polygon"), key=lambda g: g.area, default=None)
+            if tp is None:
+                continue
+        tiles.append((tp, tp.buffer(seam_mm, join_style=2, mitre_limit=3.0)))
+    return tiles if len(tiles) > 1 else None
+
+
 def _design_native(dds, tf, f_mm, contour, cid):
     """Оригинальный арт КАК ЕСТЬ (точные цвета и правило заливки) + клип по контуру через
     clipPath. Без геометрической пересборки заливок -> идеальная текстура (красное тело розы
@@ -359,6 +383,8 @@ def _instruction(pieces, lay, W, H, x0, y0, scale, font_mm):
 def _bbox_for(name, lay):
     """bbox детали (с припуском, если есть) в координатах раскладки — для рулонной упаковки."""
     from shapely.geometry import Polygon as _P, box as _bx
+    if lay.get("_tiles") and name in lay["_tiles"]:                    # печатная полоса переда/зада
+        return lay["_tiles"][name].bounds
     if name == "front":
         return (lay.get("front_seam") or lay["front"]).bounds
     if name == "back" and lay.get("back"):
@@ -399,6 +425,8 @@ def _poly_for(name, lay):
     """Реальный полигон-контур детали (seam, если есть) — для полигонального нестинга."""
     from shapely.geometry import Polygon as _P, box as _bx
     from shapely.ops import unary_union
+    if lay.get("_tiles") and name in lay["_tiles"]:                    # печатная полоса переда/зада
+        return lay["_tiles"][name]
     if name == "front":
         return lay.get("front_seam") or lay["front"]
     if name == "back" and lay.get("back"):
@@ -591,6 +619,28 @@ def main():
         bbody.append(_arc_paths(back_arcs, bk["poly"], "seam_back"))
         pieces.append(("back", bbody))
 
+    # РЕЗ НА ПЕЧАТНЫЕ ПОЛОСЫ: перёд/зад шире холста (1440) режем вертикально встык (+припуск 10мм).
+    # Верхняя схема остаётся ЦЕЛОЙ (референс сборки); полосы идут только в ПЕЧАТНЫЙ РУЛОН (roll_override).
+    roll_override = {}                                                 # name -> [(tilename, body)...] замена в рулоне
+    lay["_tiles"] = {}                                                 # tilename -> seam-полигон (для _poly_for/_bbox_for)
+    if cfg.get("print_split", True):
+        holst = cfg.get("print_split_width_mm", cfg.get("roll_width_mm", 1440))
+        def _mk_tiles(prefix, panel_poly, src_bbox, tf):
+            tl = _vtiles(panel_poly, holst, seam_mm_v)
+            if not tl:
+                return
+            out = []
+            for k, (tp, ts) in enumerate(tl):
+                nm = f"{prefix}_t{k}"
+                body = [_design_raster(page, src_bbox, tf, tp, nextid()),
+                        _poly(list(tp.exterior.coords), stroke="#000", sw=lw),
+                        _poly(list(ts.exterior.coords), stroke="#dc0000", sw=lw)]
+                out.append((nm, body)); lay["_tiles"][nm] = ts
+            roll_override[prefix] = out
+        _mk_tiles("front", lay["front"], fr_bbox, _tex_tf(contour_mm, lay["front"], f_mm))
+        if bk:
+            _mk_tiles("back", bk["poly"], bk_bbox, _tex_tf(bk["src"], bk["poly"], bk["f_mm"]))
+
     # БОКОВИНЫ (цвет-зоны + ЧЁРНЫЙ контур + цветной ключ-полоса вдоль стыков в припуске + припуск)
     from side_color import _edges_top_down
     from shapely.geometry import Polygon as _Poly
@@ -687,7 +737,13 @@ def main():
         roll_h = cfg.get("roll_width_mm", 1440)
         rgap = 2 * seam_mm_v + 20
         y_off = H + 2 * seam_mm_v + 200                                # ниже фигуры
-        roll_pieces, roll_W = _rollpack_svg(pieces, roll_h, rgap, lay,
+        roll_parts = []                                                # в рулон: перёд/зад -> печатные полосы (если резаны)
+        for nm, body in pieces:
+            if nm in roll_override:
+                roll_parts.extend(roll_override[nm])
+            else:
+                roll_parts.append((nm, body))
+        roll_pieces, roll_W = _rollpack_svg(roll_parts, roll_h, rgap, lay,
                                             y_off=y_off, inst=inst, inst_bbox=inst_bbox)
         pieces = pieces + roll_pieces                                  # фигура (верх) + печать-копия (низ)
         W = max(W, roll_W); H = y_off + roll_h + 2 * seam_mm_v + 100
