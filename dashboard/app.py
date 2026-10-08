@@ -456,6 +456,18 @@ def front_preview():
         W = int((bx1 - bx0) * sc + 2 * mg); H = int((by1 - by0) * sc + 2 * mg)
         im = Image.new("RGB", (W, H), (255, 255, 255)); dr = ImageDraw.Draw(im)
         T = lambda x, y: ((x - bx0) * sc + mg, (y - by0) * sc + mg)
+        # ТЕКСТУРА переда из макета, обрезанная по контуру (мм<->PT: mm = pt·fmm)
+        import io
+        from export_pdf_grouped import _bg_fill_colors, _pix_png_nobg
+        Z = fmm * sc
+        clip = pymupdf.Rect(bx0 / fmm, by0 / fmm, bx1 / fmm, by1 / fmm)
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(Z, Z), clip=clip, alpha=True)
+        png = _pix_png_nobg(pix, _bg_fill_colors(page, cfg))         # убрать фон макета (как в финале)
+        tex = Image.open(io.BytesIO(png)).convert("RGBA")
+        mask = Image.new("L", tex.size, 0)
+        ImageDraw.Draw(mask).polygon([((x - bx0) * sc, (y - by0) * sc) for x, y in ext.coords], fill=255)
+        tex.putalpha(Image.composite(tex.getchannel("A"), Image.new("L", tex.size, 0), mask))  # фон убран И клип по контуру
+        im.paste(tex, (int(mg), int(mg)), tex)
         dr.polygon([T(x, y) for x, y in ext.coords], outline=(20, 24, 32), width=3)
         cols = [(228, 0, 43), (21, 96, 255), (16, 160, 80), (245, 140, 0)]
         try: fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
