@@ -655,6 +655,44 @@ def buildfile(bid, name):
     return send_file(p, as_attachment=True)
 
 
+# ---- 3D: интерактивный просмотр GLB (вращение 360) ----
+V3D = "/opt/inflatable-3d/output"
+
+
+@app.route("/mv.js")
+def mv_js():
+    return send_file(os.path.join(os.path.dirname(__file__), "static", "model-viewer.min.js"),
+                     mimetype="text/javascript")
+
+
+@app.route("/glb/<name>")
+def glb_file(name):
+    p = os.path.join(V3D, os.path.basename(name), "model.glb")
+    if not os.path.isfile(p):
+        abort(404)
+    return send_file(p, mimetype="model/gltf-binary")
+
+
+@app.route("/3d")
+@app.route("/3d/<name>")
+def view3d(name="cosmo"):
+    key = request.args.get("key", "")
+    figs = sorted(d for d in os.listdir(V3D) if os.path.isfile(os.path.join(V3D, d, "model.glb"))) \
+        if os.path.isdir(V3D) else []
+    tabs = " ".join(f'<a href="/3d/{f}?key={key}" class="{"on" if f==name else ""}">{f}</a>' for f in figs)
+    return f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D — {name}</title>
+<script type="module" src="/mv.js"></script>
+<style>body{{margin:0;background:#1b1f24;color:#ddd;font-family:sans-serif}}
+.bar{{padding:10px 14px;background:#12151a}}.bar a{{color:#9cf;margin-right:12px;text-decoration:none}}
+.bar a.on{{color:#fff;font-weight:700;text-decoration:underline}}
+model-viewer{{width:100vw;height:calc(100vh - 44px);background:#eef2f6}}</style></head>
+<body><div class="bar">Фигуры: {tabs or '(нет)'} &nbsp;|&nbsp; тяни мышью — вращение 360°, колесо — зум</div>
+<model-viewer src="/glb/{name}?key={key}" camera-controls auto-rotate shadow-intensity="1"
+ exposure="1.1" camera-orbit="0deg 80deg 4m" min-camera-orbit="auto 0deg auto" touch-action="pan-y"></model-viewer>
+</body></html>"""
+
+
 if __name__ == "__main__":
     host = os.environ.get("DASH_HOST", "127.0.0.1")                    # 0.0.0.0 — слушать внешний интерфейс
     port = int(os.environ.get("DASH_PORT", "5000"))
