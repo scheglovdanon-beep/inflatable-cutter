@@ -705,6 +705,11 @@ def detect_armpits(body, cfg):
             arm_len = math.hypot(tip[0] - xf, tip[1] - yf)
             if arm_len < tip_free_frac * max(Wb, Hb):
                 continue
+            if cfg.get("arm_tip_outward"):                            # рука уходит НАРУЖУ от оси (боковые руки),
+                if (tip[0] - xf) * (xf - axx) <= 0:                   # не вверх к ложке/декору: tip в сторону подмышки
+                    continue
+                if abs(tip[0] - axx) <= abs(xf - axx):                # и дальше от оси, чем подмышка
+                    continue
             arm, rest = cut_across_arm(body, f, tip, cfg)
             if arm is None:
                 continue
