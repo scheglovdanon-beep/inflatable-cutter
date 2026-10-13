@@ -568,6 +568,7 @@ def arm_layout():
         from shapely.geometry import Polygon
         from export_svg import build_layout
         from sides import PT2MM
+        from side_color import arm_fill_color, hand_fill_color
         _co = data.get("clip_outline")
         arms = _fill_tips(d, size, arms, clip_outline=_co)
         cfg = _build_cfg(size, len(arms), ident, arms, spare=data.get("spare"),
@@ -581,6 +582,8 @@ def arm_layout():
             os.chdir(_cwd)
         fmm = fig.s * PT2MM
         ap = lay.get("arm_pieces", []); hp = lay.get("hand_pieces", [])
+        import numpy as np
+        arm_col = arm_fill_color(page, arm_pts) if (ap and arm_pts is not None) else (200, 60, 50)
         n_groups = 0
         if ap:
             n_groups = 1 if (ident or len(ap) <= 3) else max(1, len(ap) // 3)
@@ -602,27 +605,50 @@ def arm_layout():
             W = int((xs1 - xs0) * sc + 2 * mg); H = int((ys1 - ys0) * sc + 2 * mg)
             im = Image.new("RGB", (W, H), (255, 255, 255)); dr = ImageDraw.Draw(im)
             T = lambda x, y: ((x - xs0) * sc + mg, (y - ys0) * sc + mg)
+            # цвет кисти-боковины этой руки (по кисти-лицо)
+            hsrc = next((pp.get("src") for pp in hpg if pp.get("name") == "левая сторона" and pp.get("src") is not None), None)
+            hcol = hand_fill_color(page, np.asarray(hsrc, float)) if hsrc is not None else (245, 245, 245)
+
+            def _poly_mask(poly):
+                m = Image.new("L", im.size, 0)
+                ImageDraw.Draw(m).polygon([T(x, y) for x, y in poly.exterior.coords], fill=255); return m
+
+            def _fill(poly, col):
+                im.paste(Image.new("RGB", im.size, tuple(int(c) for c in col)), (0, 0), _poly_mask(poly))
+
             for p in pieces:
-                poly = p["poly"]; nm = p.get("name", "")
-                src = p.get("src")
-                if src is not None and len(src) == len(list(poly.exterior.coords)[:-1]):
-                    s = np.asarray(src, float)                        # текстура кисти-стороны с макета (приблизит. bbox)
+                poly = p["poly"]; nm = p.get("name", ""); src = p.get("src")
+                dstc = list(poly.exterior.coords)[:-1]
+                if src is not None and len(src) == len(dstc):         # КИСТЬ: аффинный варп src->dst (зад отзеркалится)
+                    s = np.asarray(src, float)
                     sb = (s[:, 0].min(), s[:, 1].min(), s[:, 0].max(), s[:, 1].max())
                     Z = fmm * sc
-                    clip = pymupdf.Rect(sb[0], sb[1], sb[2], sb[3])
-                    pix = page.get_pixmap(matrix=pymupdf.Matrix(Z, Z), clip=clip)
+                    pix = page.get_pixmap(matrix=pymupdf.Matrix(Z, Z), clip=pymupdf.Rect(*sb))
                     tex = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                    bx = poly.bounds
-                    tex = tex.resize((max(1, int((bx[2] - bx[0]) * sc)), max(1, int((bx[3] - bx[1]) * sc))))
-                    mask = Image.new("L", im.size, 0)
-                    ImageDraw.Draw(mask).polygon([T(x, y) for x, y in poly.exterior.coords], fill=255)
-                    im.paste(tex, (int(T(bx[0], bx[1])[0]), int(T(bx[0], bx[1])[1])), mask.crop(
-                        (int(T(bx[0], bx[1])[0]), int(T(bx[0], bx[1])[1]),
-                         int(T(bx[0], bx[1])[0]) + tex.width, int(T(bx[0], bx[1])[1]) + tex.height)))
+                    src_px = np.array([[(sx - sb[0]) * Z, (sy - sb[1]) * Z] for sx, sy in s], float)
+                    dst_px = np.array([list(T(x, y)) for x, y in dstc], float)
+                    Mo = np.hstack([dst_px, np.ones((len(dst_px), 1))])   # output(canvas)->input(tex)
+                    ax = np.linalg.lstsq(Mo, src_px[:, 0], rcond=None)[0]
+                    ay = np.linalg.lstsq(Mo, src_px[:, 1], rcond=None)[0]
+                    layer = tex.transform((W, H), Image.AFFINE,
+                                          (ax[0], ax[1], ax[2], ay[0], ay[1], ay[2]), resample=Image.BILINEAR)
+                    im.paste(layer, (0, 0), _poly_mask(poly))
                     dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 150, 90), width=2)
-                else:
-                    col = (235, 225, 210) if nm in ("baza", "plecho", "predplechie") else (245, 245, 245)
-                    dr.polygon([T(x, y) for x, y in poly.exterior.coords], fill=col, outline=(150, 0, 150))
+                elif nm == "боковина":                                # боковина кисти — цвет кисти
+                    _fill(poly, hcol)
+                    dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 150, 90), width=2)
+                else:                                                 # ЦЕПОЧКА: реальный цвет/полосы руки
+                    fillc = tuple(p.get("fill") or arm_col)
+                    bands = p.get("bands")
+                    if bands:
+                        b = poly.bounds; y0b = b[1]; hpx = b[3] - b[1]
+                        layer = Image.new("RGB", im.size, fillc); ld = ImageDraw.Draw(layer)
+                        for f0, f1, cc in bands:
+                            ld.rectangle([T(b[0], y0b + hpx * f0), T(b[2], y0b + hpx * f1)], fill=tuple(cc))
+                        im.paste(layer, (0, 0), _poly_mask(poly))
+                    else:
+                        _fill(poly, fillc)
+                    dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(150, 0, 150), width=1)
                 c = poly.centroid; tx = lbl.get(nm, nm)
                 dr.text((T(c.x, c.y)[0] - len(tx) * 3, T(c.x, c.y)[1] - 7), tx, fill=(40, 40, 40), font=fnt)
             fnm = f"armlay{gi}.png"; im.save(os.path.join(d, fnm))
