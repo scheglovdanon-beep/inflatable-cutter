@@ -216,8 +216,18 @@ canvas{display:block; cursor:crosshair; max-width:100%; height:auto; border-radi
 
 /* --- лайтбокс: раскладка в большом формате --- */
 #lightbox{position:fixed; inset:0; background:rgba(10,14,24,.93); z-index:9999; display:none; align-items:center; justify-content:center; padding:18px}
-#lbStage{width:96vw; height:90vh; position:relative; background:#fff; border-radius:12px; overflow:hidden}
+
 #lbClose{position:absolute; top:14px; right:18px; z-index:10001; width:46px; height:46px; border:0; border-radius:50%; background:rgba(255,255,255,.16); color:#fff; font-size:22px; line-height:1; cursor:pointer}
 #lbClose:hover{background:rgba(255,255,255,.3)}
-#lbStage .zoomctl{margin:10px 12px 6px}
-#lbStage .zviewport{height:calc(90vh - 62px); border-radius:0}
+
+
+
+/* лайтбокс: картинка на весь экран (клик — закрыть) */
+#lbImg{max-width:96vw; max-height:92vh; object-fit:contain; border-radius:8px; box-shadow:0 10px 40px rgba(0,0,0,.5); cursor:zoom-out}
+/* шаг 5: перёд + раскладка руки в ряд */
+.s5row{display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start}
+#frontPrevWrap{flex:1 1 480px; min-width:320px}
+#armLayWrap{flex:1 1 320px; min-width:280px}
+.armlayimgs{display:flex; gap:12px; flex-wrap:wrap; margin-top:8px}
+.armlayimg{max-width:100%; width:auto; max-height:420px; border:1px solid var(--line); border-radius:10px; background:#fff; cursor:zoom-in}
+@media (max-width:860px){ .s5row{flex-direction:column} }

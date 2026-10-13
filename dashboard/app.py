@@ -306,9 +306,40 @@ def upload():
     return jsonify(**meta)
 
 
+def _dedupe_library():
+    """Удалить дубликаты макетов в базе (одинаковый PDF по содержимому) — оставить новейший."""
+    import hashlib
+    seen = {}; dups = []
+    for sid in os.listdir(LIB):
+        pdf = os.path.join(LIB, sid, "macet.pdf")
+        if not os.path.isfile(pdf):
+            continue
+        try:
+            hsh = hashlib.md5(open(pdf, "rb").read()).hexdigest()
+            mdp = os.path.join(LIB, sid, "meta.json")
+            mt = os.path.getmtime(mdp) if os.path.isfile(mdp) else os.path.getmtime(pdf)
+        except Exception:
+            continue
+        if hsh in seen:
+            old_mt, old_sid = seen[hsh]
+            if mt > old_mt:                                           # этот новее -> старый в дубликаты
+                dups.append(old_sid); seen[hsh] = (mt, sid)
+            else:
+                dups.append(sid)
+        else:
+            seen[hsh] = (mt, sid)
+    for sid in dups:
+        try:
+            shutil.rmtree(os.path.join(LIB, os.path.basename(sid)), ignore_errors=True)
+        except Exception:
+            pass
+    return len(dups)
+
+
 @app.route("/api/library")
 def library():
     """Список макетов базы (прогнанных через инструмент): id, имя, миниатюра."""
+    _dedupe_library()                                                 # чистим дубликаты при каждом показе
     items = []
     for sid in os.listdir(LIB):
         md = os.path.join(LIB, sid, "meta.json")
@@ -522,6 +553,83 @@ def front_preview():
                        contour=cont_px, segments=segs)
     except Exception as e:
         return jsonify(error=f"превью переда не удалось: {e}"), 400
+
+
+@app.route("/api/arm_layout", methods=["POST"])
+def arm_layout():
+    """Полная раскладка руки(рук) с основой (база→плечо→предплечье→кисть) — для показа справа
+    на шаге отверстия. 1 картинка если 1 рука или руки одинаковые; 2 если 2 разные руки."""
+    data = request.get_json(force=True)
+    sid = data["sid"]; d = _sdir(sid); size = data.get("size", "2700")
+    arms = data.get("arms", []); ident = bool(data.get("arms_identical", False))
+    try:
+        import numpy as np
+        from PIL import Image, ImageDraw, ImageFont
+        from shapely.geometry import Polygon
+        from export_svg import build_layout
+        from sides import PT2MM
+        _co = data.get("clip_outline")
+        arms = _fill_tips(d, size, arms, clip_outline=_co)
+        cfg = _build_cfg(size, len(arms), ident, arms, spare=data.get("spare"),
+                         back_copy=data.get("back_copy"), clip_outline=_co)
+        page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
+        _cwd = os.getcwd()
+        try:
+            os.chdir(ROOT)                                            # arm_template.pdf и пр. — относительно корня
+            lay, fig, contour_mm, g, arm_pts, seam = build_layout(page, cfg)
+        finally:
+            os.chdir(_cwd)
+        fmm = fig.s * PT2MM
+        ap = lay.get("arm_pieces", []); hp = lay.get("hand_pieces", [])
+        n_groups = 0
+        if ap:
+            n_groups = 1 if (ident or len(ap) <= 3) else max(1, len(ap) // 3)
+        try:
+            fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 15)
+        except Exception:
+            fnt = ImageFont.load_default()
+        lbl = {"baza": "база", "plecho": "плечо", "predplechie": "предплечье",
+               "левая сторона": "кисть-лицо", "боковина": "боковина", "правая сторона": "кисть-зад"}
+        out = []
+        for gi in range(n_groups):
+            apg = ap[gi * 3:gi * 3 + 3]; hpg = hp[gi * 3:gi * 3 + 3]
+            pieces = apg + hpg
+            if not pieces:
+                continue
+            xs0 = min(p["poly"].bounds[0] for p in pieces); ys0 = min(p["poly"].bounds[1] for p in pieces)
+            xs1 = max(p["poly"].bounds[2] for p in pieces); ys1 = max(p["poly"].bounds[3] for p in pieces)
+            sc = 520.0 / max(xs1 - xs0, ys1 - ys0, 1.0); mg = 16
+            W = int((xs1 - xs0) * sc + 2 * mg); H = int((ys1 - ys0) * sc + 2 * mg)
+            im = Image.new("RGB", (W, H), (255, 255, 255)); dr = ImageDraw.Draw(im)
+            T = lambda x, y: ((x - xs0) * sc + mg, (y - ys0) * sc + mg)
+            for p in pieces:
+                poly = p["poly"]; nm = p.get("name", "")
+                src = p.get("src")
+                if src is not None and len(src) == len(list(poly.exterior.coords)[:-1]):
+                    s = np.asarray(src, float)                        # текстура кисти-стороны с макета (приблизит. bbox)
+                    sb = (s[:, 0].min(), s[:, 1].min(), s[:, 0].max(), s[:, 1].max())
+                    Z = fmm * sc
+                    clip = pymupdf.Rect(sb[0], sb[1], sb[2], sb[3])
+                    pix = page.get_pixmap(matrix=pymupdf.Matrix(Z, Z), clip=clip)
+                    tex = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    bx = poly.bounds
+                    tex = tex.resize((max(1, int((bx[2] - bx[0]) * sc)), max(1, int((bx[3] - bx[1]) * sc))))
+                    mask = Image.new("L", im.size, 0)
+                    ImageDraw.Draw(mask).polygon([T(x, y) for x, y in poly.exterior.coords], fill=255)
+                    im.paste(tex, (int(T(bx[0], bx[1])[0]), int(T(bx[0], bx[1])[1])), mask.crop(
+                        (int(T(bx[0], bx[1])[0]), int(T(bx[0], bx[1])[1]),
+                         int(T(bx[0], bx[1])[0]) + tex.width, int(T(bx[0], bx[1])[1]) + tex.height)))
+                    dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 150, 90), width=2)
+                else:
+                    col = (235, 225, 210) if nm in ("baza", "plecho", "predplechie") else (245, 245, 245)
+                    dr.polygon([T(x, y) for x, y in poly.exterior.coords], fill=col, outline=(150, 0, 150))
+                c = poly.centroid; tx = lbl.get(nm, nm)
+                dr.text((T(c.x, c.y)[0] - len(tx) * 3, T(c.x, c.y)[1] - 7), tx, fill=(40, 40, 40), font=fnt)
+            fnm = f"armlay{gi}.png"; im.save(os.path.join(d, fnm))
+            out.append(f"/api/img/{sid}/{fnm}")
+        return jsonify(images=out, count=len(out))
+    except Exception as e:
+        return jsonify(error=f"раскладка руки не удалась: {e}", images=[]), 200
 
 
 def _save_build_catalog(job, d):

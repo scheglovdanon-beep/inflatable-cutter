@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1420">
 <title>Раскрой надувных фигур — админка</title>
-<link rel="stylesheet" href="/static/style.css?v=2026f">
+<link rel="stylesheet" href="/static/style.css?v=2026g">
 </head>
 <body>
 <header>
@@ -64,8 +64,7 @@
         </label>
         <div style="margin-top:6px">
           <label><input type="checkbox" id="spare" checked> запасная рука (копия на случай порыва)</label><br>
-          <label><input type="checkbox" id="backCopy"> зад = копия переда (симметричная фигура)</label><br>
-          <label><input type="checkbox" id="clipOutline" checked> контур по чёрной обводке (стикер-макеты: убирает белый отступ)</label>
+          <label><input type="checkbox" id="backCopy"> зад = копия переда (симметричная фигура)</label>
         </div>
         <p class="hint">Для фигур с 2 разными руками, где перёд и зад одинаковы (напр. Охотники),
           включите «зад = копия переда» и выключите запаску — детали лягут ровными колонками.</p>
@@ -117,15 +116,22 @@
   <!-- ШАГ 5: сборка -->
   <section id="s5" class="panel">
     <h2>Раскладка</h2>
-    <div id="frontPrevWrap">
-      <h3>Перёд: где ляжет рука (по длине отверстия)</h3>
-      <div id="frontPrevMsg" class="msg"></div>
-      <div class="canvaswrap" id="fpWrap" style="display:none"><canvas id="fpCanvas"></canvas></div>
-      <div id="fpBtns" style="display:none; margin-top:8px">
-        <button id="fpEdit">изменить</button>
-        <button id="fpApply" style="display:none">применить</button>
-        <button id="fpReset" class="back" style="display:none">сброс</button>
-        <p class="hint" id="fpHint" style="display:none">Тащите отрезок вверх/вниз по контуру — так двигается отверстие для руки. «Применить» сдвинет отверстие при сборке.</p>
+    <div class="s5row">
+      <div id="frontPrevWrap">
+        <h3>Перёд: где ляжет рука (по длине отверстия)</h3>
+        <div id="frontPrevMsg" class="msg"></div>
+        <div class="canvaswrap" id="fpWrap" style="display:none"><canvas id="fpCanvas"></canvas></div>
+        <div id="fpBtns" style="display:none; margin-top:8px">
+          <button id="fpEdit">изменить</button>
+          <button id="fpApply" style="display:none">применить</button>
+          <button id="fpReset" class="back" style="display:none">сброс</button>
+          <p class="hint" id="fpHint" style="display:none">Тащите отрезок вверх/вниз по контуру — так двигается отверстие для руки. «Применить» сдвинет отверстие при сборке.</p>
+        </div>
+      </div>
+      <div id="armLayWrap">
+        <h3>Раскладка руки (база→плечо→предплечье→кисть)</h3>
+        <div id="armLayMsg" class="msg"></div>
+        <div id="armLayImgs" class="armlayimgs"></div>
       </div>
     </div>
     <button id="btnBuild">➕ Поставить в очередь на сборку</button>
@@ -149,6 +155,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=2026h"></script>
+<script src="/static/app.js?v=2026i"></script>
 </body>
 </html>

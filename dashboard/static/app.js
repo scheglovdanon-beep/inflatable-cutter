@@ -11,20 +11,22 @@ const KEY = new URLSearchParams(location.search).get("key")
 function imgURL(u){ return u + (u.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(KEY) + "&t=" + Date.now(); }
 function imgURLc(u){ return u + (u.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(KEY); }  // кэшируемый (без t) — для крупных превью
 
-// ---------- Лайтбокс: просмотр раскладки в большом формате (зум/пан) ----------
+// ---------- Лайтбокс: большая картинка на весь экран (клик по маленькой — открыть/закрыть) ----------
 function openLightbox(url){
   let lb=document.getElementById("lightbox");
   if(!lb){ lb=document.createElement("div"); lb.id="lightbox";
-    lb.innerHTML=`<button id="lbClose" title="закрыть">✕</button><div id="lbStage"></div>`;
+    lb.innerHTML=`<button id="lbClose" title="закрыть">✕</button><img id="lbImg" alt="">`;
     document.body.appendChild(lb);
-    lb.addEventListener("click", e=>{ if(e.target===lb) closeLightbox(); });
-    document.getElementById("lbClose").onclick=closeLightbox;
+    lb.addEventListener("click", closeLightbox);                     // клик в любом месте (вкл. картинку) — закрыть
     document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeLightbox(); });
   }
+  const cur=lb.getAttribute("data-url");
+  if(lb.style.display==="flex" && cur===url){ closeLightbox(); return; }  // повторный клик по той же — закрыть
+  lb.setAttribute("data-url", url);
+  document.getElementById("lbImg").src=imgURLc(url);
   lb.style.display="flex";
-  makeZoomable(document.getElementById("lbStage"), imgURLc(url));     // переиспользуем зум/пан превью
 }
-function closeLightbox(){ const lb=document.getElementById("lightbox"); if(lb) lb.style.display="none"; }
+function closeLightbox(){ const lb=document.getElementById("lightbox"); if(lb){ lb.style.display="none"; lb.removeAttribute("data-url"); } }
 
 const $ = s => document.querySelector(s);
 const show = n => { document.querySelectorAll(".panel").forEach(p=>p.classList.remove("on"));
@@ -102,7 +104,7 @@ async function enterStep3(btn){                 // детект кандидат
   startCut();
 }
 $("#toS3").onclick = () => {
-  S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked; S.clip=$("#clipOutline").checked;
+  S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked; S.clip=true;  // контур всегда по чёрной обводке (без белого фона)
   S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
   S.cands=null;
   if(S.n===0){ goStep5(); return; }
@@ -192,8 +194,29 @@ function ov4(p){ const a=S.arms[S.cur];
 $("#undo4").onclick=()=>{ const a=S.arms[S.cur];
   if(a.elbow.length){ a.elbow.pop(); } else if(a.wrist.length){ a.wrist.pop(); }
   pick4.draw(); updPrompt4(); };
-function s4done(){ msg("#s4msg","",""); if(S.cur < S.n-1){ S.cur++; startHand(); } else goStep5(); }
-function goStep5(){ show(5); loadFrontPreview(); }
+function s4done(){ msg("#s4msg","","");
+  if(S.ident && S.n>1){                                   // одинаковые руки: кисть/предплечье только по 1-й
+    for(let i=1;i<S.n;i++){ S.arms[i].wrist=(S.arms[0].wrist||[]).slice(); S.arms[i].elbow=(S.arms[0].elbow||[]).slice(); }
+    goStep5(); return;
+  }
+  if(S.cur < S.n-1){ S.cur++; startHand(); } else goStep5(); }
+function goStep5(){ show(5); loadFrontPreview(); loadArmLayout(); }
+async function loadArmLayout(){               // #3: полная раскладка руки(рук) справа от ползунка
+  const wrap=$("#armLayWrap"), box=$("#armLayImgs");
+  if(S.n===0){ if(wrap) wrap.style.display="none"; return; }
+  if(wrap) wrap.style.display="block";
+  box.innerHTML=""; msg("#armLayMsg","строю раскладку руки…","spin");
+  try{
+    const r=await fetch("/api/arm_layout",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,arms_identical:S.ident,
+        spare:$("#spare").checked,back_copy:$("#backCopy").checked,arms:S.arms.map(armPayload)})});
+    const j=await r.json();
+    if(!(j.images&&j.images.length)){ msg("#armLayMsg",j.error||"раскладка руки недоступна","err"); return; }
+    msg("#armLayMsg", j.images.length>1?"2 разные руки":"раскладка руки","ok");
+    j.images.forEach((u,i)=>{ const im=document.createElement("img"); im.className="armlayimg clickpreview";
+      im.src=imgURL(u); im.title="нажмите — открыть в большом формате"; im.onclick=()=>openLightbox(u); box.appendChild(im); });
+  }catch(e){ msg("#armLayMsg","не удалось построить раскладку руки","err"); }
+}
 const FP = { cv:$("#fpCanvas"), ctx:$("#fpCanvas").getContext("2d"), img:null, data:null,
              scale:1, editing:false, drag:-1, cols:["#e4002b","#1560ff","#10a050","#f58c00"] };
 async function loadFrontPreview(){
