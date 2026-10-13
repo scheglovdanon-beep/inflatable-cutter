@@ -729,7 +729,13 @@ def main():
         # цветной ключ: тот же цвет, что дуга переда (_palette[i]), вдоль ОБОИХ длинных рёбер
         # (стык с передом и с задом), ЦЕЛИКОМ в кольце припуска, с зазором от чёрного контура.
         cen = np.asarray(_Poly(list(s["poly"])).centroid.coords[0], float)
-        le, re = _edges_top_down(list(s["poly"]), s.get("waist") is not None)
+        nd = s.get("dome_n", 0)
+        if nd >= 2:                                                   # купол: poly = дуга(nd) + [низ-право, низ-лево]
+            pp = list(s["poly"])
+            le = [pp[0], pp[-1]]                                      # начало дуги (верх-лево) -> низ-лево
+            re = [pp[nd - 1], pp[nd]]                                 # конец дуги (верх-право) -> низ-право
+        else:
+            le, re = _edges_top_down(list(s["poly"]), s.get("waist") is not None)
         keycol = HEX(_palette(s["i"]))
         for edge in (le, re):
             d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(edge, cen, off))
