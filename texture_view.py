@@ -169,6 +169,9 @@ def main():
     for ah in lay.get("arm_holes", []):                             # отверстия рук (по одному на руку)
         dr.ellipse([T(ah["cx"] - ah["r"], ah["cy"] - ah["r"]), T(ah["cx"] + ah["r"], ah["cy"] + ah["r"])],
                    outline=(220, 0, 0), width=lw)
+    for dh in lay.get("detail_holes", []):                          # отверстия вшивных деталей
+        dr.ellipse([T(dh["cx"] - dh["r"], dh["cy"] - dh["r"]), T(dh["cx"] + dh["r"], dh["cy"] + dh["r"])],
+                   outline=(0, 120, 220), width=lw)
 
     # ----- РУКА (база/плечо/предплечье) — цвет зоны, либо ПОЛОСЫ текстуры вдоль руки + подпись -----
     for ap in lay.get("arm_pieces", []):
@@ -247,6 +250,13 @@ def main():
     for sp in lay.get("spare_arm", []):                             # ЗАПАСНАЯ РУКА (копия)
         render_piece(sp["poly"], sp["kind"], sp.get("src"), sp.get("fill"))
         label(sp["poly"], lbl(sp.get("name", "")))
+    for dp in lay.get("detail_pieces", []):                         # ВШИВНЫЕ ДЕТАЛИ: перёд текстура, зад/гассет цвет
+        if dp.get("src") is not None:
+            render_piece(dp["poly"], "hand", dp.get("src"))
+        else:
+            dr.polygon([T(x, y) for x, y in dp["poly"].exterior.coords],
+                       fill=tuple(dp.get("fill") or (200, 200, 200)), outline=(0, 120, 220))
+        label(dp["poly"], dp.get("name", ""))
     import gc; gc.collect()                                          # освободить накопленные слои деталей
 
     # ----- ПРИПУСК НА ШОВ +Nмм: контур реза вокруг каждого лекала (сплошной, 0.2мм) -----

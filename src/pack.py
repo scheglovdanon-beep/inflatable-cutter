@@ -46,7 +46,7 @@ def _movables(layout):
                     ah["cx"] += dx; ah["cy"] += dy
         add("strip_" + (s.get("side") or "left"), s.get("seam") or Polygon(s["poly"]), mvs)
 
-    for key in ("arm_pieces", "hand_pieces", "spare_arm"):
+    for key in ("arm_pieces", "hand_pieces", "spare_arm", "detail_pieces"):
         cat = "arm_spare" if key == "spare_arm" else "arm_main"       # основная рука vs запасная (двигаем блоком)
         for p in layout.get(key, []):
             def mvp(dx, dy, p=p):
@@ -223,7 +223,7 @@ def _units(layout):
                     ah["cx"] += dx; ah["cy"] += dy
         add(seam, mv)
 
-    for key in ("arm_pieces", "hand_pieces", "spare_arm"):
+    for key in ("arm_pieces", "hand_pieces", "spare_arm", "detail_pieces"):
         for p in layout.get(key, []):
             def mv(dx, dy, p=p):
                 p["poly"] = affinity.translate(p["poly"], dx, dy)
@@ -298,7 +298,7 @@ def _units_aff(layout):
                     ah["cx"], ah["cy"] = _apply_pt(aff, ah["cx"], ah["cy"])
         add(s.get("seam") or Polygon(s["poly"]), ap)
 
-    for key in ("arm_pieces", "hand_pieces", "spare_arm"):
+    for key in ("arm_pieces", "hand_pieces", "spare_arm", "detail_pieces"):
         for p in layout.get(key, []):
             def ap(aff, p=p):
                 p["poly"] = AT(p["poly"], aff)

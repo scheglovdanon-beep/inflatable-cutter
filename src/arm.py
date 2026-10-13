@@ -1724,3 +1724,112 @@ def render_hand(h, out_png, target_h=900, margin=40):
             f"verh.rebro predpl={h['fore_top']:.0f} shirina W={h['W']:.0f} | "
             f"otkrytyi krai 2*s+2*W={h['opening']:.0f}=={h['fore_top']:.0f}", fill=(0, 0, 0))
     im.save(out_png)
+
+
+# ============ ВШИВНЫЕ ДЕТАЛИ (ложка и пр.): рез + лекало + отверстие ============
+
+def cut_details(page, contour_pt, cfg, strict=True):
+    """Вырезать вшивные детали из контура (PT) ручным резом (как рука). Читает
+    manual_details=[{f, blade?:[[x,y],[x,y]], tip?, hole_dy?}]. Возвращает (body_pt, details).
+    details[i]: {poly_pt, f, tip, attach_pt, attach_len_pt (длина линии реза, PT), hole_dy}."""
+    man = cfg.get("manual_details")
+    if not man:
+        return contour_pt, []
+    from shapely.geometry import Point as _Pt, LineString as _LS
+    body_pt = contour_pt; cen0 = contour_pt.centroid; out = []
+    for m in man:
+        exc = body_pt.exterior
+        snap = lambda p: np.asarray(exc.interpolate(exc.project(_Pt(*p))).coords[0], float)
+        f = tuple(m["f"]); bl = m.get("blade"); a_pt = c_pt = None; blade = None
+        if bl:
+            a = snap(bl[0]); c = snap(bl[1]); a_pt, c_pt = a, c
+            dv = c - a; nn = np.hypot(*dv)
+            if nn > 1:
+                dv = dv / nn; blade = (tuple(a - dv * 40), tuple(c + dv * 40))
+        else:
+            fs = snap(f); fx = float(fs[0]); yb = body_pt.bounds
+            inter = exc.intersection(_LS([(fx, yb[1] - 5), (fx, yb[3] + 5)])); pts = []
+            for gg in getattr(inter, "geoms", [inter]):
+                if not gg.is_empty:
+                    pts += [tuple(cc) for cc in np.atleast_2d(np.asarray(gg.coords))]
+            ups = [p for p in pts if p[1] < fs[1] - 1]
+            if ups:
+                up = min(ups, key=lambda p: fs[1] - p[1])
+                a_pt = np.array([fx, fs[1]]); c_pt = np.array([fx, up[1]])
+                blade = ((fx, float(fs[1]) + 40), (fx, float(up[1]) - 40))
+        if blade is None:
+            if strict:
+                raise RuntimeError(f"рез детали не удался (f={f})")
+            continue
+        tip = m.get("tip")
+        if not tip:
+            u = np.array([f[0] - cen0.x, f[1] - cen0.y]); u = u / (np.linalg.norm(u) or 1)
+            ex = np.asarray(exc.coords, float); tip = tuple(ex[int(((ex - np.array(f)) @ u).argmax())])
+        det, body2 = cut_across_arm(body_pt, f, tip, cfg, blade=blade)
+        if det is None:
+            if strict:
+                raise RuntimeError(f"рез детали не удался (f={f})")
+            continue
+        body_pt = body2
+        attach_len = float(np.hypot(*(c_pt - a_pt))) if (a_pt is not None and c_pt is not None) else 0.0
+        out.append({"poly_pt": det, "f": list(f), "tip": list(tip),
+                    "attach_pt": a_pt.tolist() if a_pt is not None else list(f),
+                    "attach_len_pt": attach_len, "hole_dy": m.get("hole_dy", 0.0)})
+    return body_pt, out
+
+
+def build_detail(det_poly_mm, attach_len_mm, gap_mm=40.0):
+    """Лекало вшивной детали: перёд + зеркальный зад + гассет-полоска.
+    Ширина гассета W = ШИРИНА ДЕТАЛИ (меньшая сторона bbox) — деталь надувается толстой.
+    Длина гассета H = свободный периметр (периметр − линия реза).
+    opening (вшивается в отверстие тела) = 2·рез + 2·W (сумма коротких рёбер)."""
+    front = affinity.translate(det_poly_mm, -det_poly_mm.bounds[0], -det_poly_mm.bounds[1])
+    mnx, mny, mxx, mxy = front.bounds; fw, fh = mxx - mnx, mxy - mny
+    W = max(min(fw, fh), 1.0)                                           # ширина детали = меньшая сторона
+    H = max(front.exterior.length - attach_len_mm, 1.0)                 # свободный периметр
+    back = affinity.scale(front, xfact=-1.0, origin=(fw / 2.0, fh / 2.0))
+    gusset = box(0, 0, W, H)
+    back = affinity.translate(back, fw + gap_mm, 0)
+    gusset = affinity.translate(gusset, 2 * fw + 2 * gap_mm, 0)
+    opening = 2.0 * attach_len_mm + 2.0 * W
+    return {"front": front, "back": back, "gusset": gusset, "W": W, "H": H,
+            "fw": fw, "fh": fh, "opening": opening}
+
+
+def _detail_main_color(page, poly_pt):
+    """Доминирующий НАСЫЩЕННЫЙ цвет детали (не обводка/не белый фон) — для гассета."""
+    b = poly_pt.bounds
+    try:
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2), clip=pymupdf.Rect(*b))
+        arr = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)[:, :, :3]
+        arr = arr.reshape(-1, 3).astype(int)
+    except Exception:
+        return (200, 200, 200)
+    mx = arr.max(1); mn = arr.min(1); sat = mx - mn
+    keep = arr[(mx < 240) & (mn > 15) & ((sat > 30) | ((mx < 210) & (mx > 60)))]   # не белый/чёрный
+    if len(keep) < 10:
+        keep = arr[(mx < 245) & (mn > 10)]
+    if len(keep) < 1:
+        return (180, 180, 180)
+    q = (keep // 24) * 24 + 12                                          # мода по грубым бинам
+    uniq, cnt = np.unique(q, axis=0, return_counts=True)
+    c = uniq[int(cnt.argmax())]
+    return (int(c[0]), int(c[1]), int(c[2]))
+
+
+def place_detail(layout, det, src_pts, color, gap=120.0):
+    """Положить детали вшивной детали (перёд|зад|боковина) РЯДОМ ВНИЗУ раскладки + отметить.
+    src_pts — контур перёда в PT макета (для текстуры); color — основной цвет детали (гассет)."""
+    norm = lambda p: affinity.translate(p, -p.bounds[0], -p.bounds[1])
+    y = layout["sheet_h"] + gap; x = gap; placed = []                  # НИЖЕ всей раскладки, слева
+    row = [("деталь-перёд", norm(det["front"]), src_pts), ("деталь-зад", norm(det["back"]), None),
+           ("деталь-боковина", norm(det["gusset"]), None)]
+    for name, p, src in row:
+        pw, ph = p.bounds[2], p.bounds[3]
+        placed.append({"name": name, "poly": affinity.translate(p, x, y),
+                       "w": pw, "h": ph, "src": src, "fill": color})
+        x += pw + gap
+    layout.setdefault("detail_pieces", []).extend(placed)
+    layout["sheet_w"] = max(layout["sheet_w"], x)
+    layout["sheet_h"] = max(layout["sheet_h"], max(p["poly"].bounds[3] for p in placed) + gap)
+    return placed

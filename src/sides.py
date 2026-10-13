@@ -294,11 +294,13 @@ def place_arm_hole_xy(layout, g, contour_mm, shoulder_xy, cfg):
                           "r": R, "piece": s["i"], "side": s.get("side", "left")}
 
 
-def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg, dy_mm=0.0):
+def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg, dy_mm=0.0, r_override=None, hole_list="arm_holes"):
     """Ø arm_hole_diameter_mm на боковине, ближайшей к точке подмышки armpit_pt (в PT).
     Пишет в СПИСОК arm_holes (не перезатирает при нескольких руках). Боковина — по индексу
     сегмента гассета (seg['i']), как place_arm_hole. dy_mm — ручной сдвиг центра отверстия
-    вверх(-)/вниз(+) вдоль полоски (из UI: перетаскивание отрезка)."""
+    вверх(-)/вниз(+) вдоль полоски (из UI: перетаскивание отрезка).
+    r_override — радиус отверстия в мм (для вшивных деталей; иначе arm_hole_diameter_mm).
+    hole_list — ключ списка отверстий в layout (arm_holes / detail_holes)."""
     from shapely.geometry import Point
     f_mm = fig.s * PT2MM
     ax = armpit_pt[0] * f_mm; ay = armpit_pt[1] * f_mm              # подмышка в мм (как contour_mm)
@@ -311,7 +313,7 @@ def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg, dy_mm=0.0):
     if s is None:
         return
     xs = [p[0] for p in s["poly"]]; ys = [p[1] for p in s["poly"]]
-    R = cfg.get("arm_hole_diameter_mm", 250) / 2.0
+    R = float(r_override) if r_override else cfg.get("arm_hole_diameter_mm", 250) / 2.0
     m = cfg.get("arm_hole_top_margin_mm", 20)
     stop, sbot = min(ys), max(ys); Ls = sbot - stop
     if cfg.get("arm_hole_at_armpit"):                              # НИЗ отверстия = точка подмышки (круг вверх)
@@ -321,7 +323,7 @@ def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg, dy_mm=0.0):
         cy = min(max(y_arm - R + dy_mm, stop + m + R), sbot - m - R)   # низ круга на подмышке (+ ручной сдвиг), в пределах полоски
     else:
         cy = min(max(stop + m + R + dy_mm, stop + m + R), sbot - m - R)   # у верха полоски + ручной сдвиг
-    layout.setdefault("arm_holes", []).append(
+    layout.setdefault(hole_list, []).append(
         {"cx": (min(xs) + max(xs)) / 2.0, "cy": cy, "r": R, "piece": piece_i})
 
 

@@ -98,6 +98,11 @@ def build_layout(page, cfg):
         from arm import cut_waving_arms
         fig.contour_pt, cut_arms = cut_waving_arms(page, fig.contour_pt, cfg, strict=True)  # ТЕЛО переда БЕЗ руки
 
+    cut_dets = []                                                # ВШИВНЫЕ ДЕТАЛИ (ложка и пр.) — режем из переда
+    if cfg.get("manual_details"):
+        from arm import cut_details
+        fig.contour_pt, cut_dets = cut_details(page, fig.contour_pt, cfg, strict=True)
+
     contour_mm = smooth_front(contour_to_mm(fig), cfg)
     g = build_gusset(contour_mm, cfg); classify_sides(g, contour_mm)
     lay = build_fitting_layout(contour_mm, g, base=build_base(g, cfg))
@@ -159,6 +164,19 @@ def build_layout(page, cfg):
                 if arm_pts is None:
                     arm_pts = ap
                 place_armpit_hole(lay, g, contour_mm, ca["f"], fig, cfg, dy_mm=ca.get("hole_dy", 0.0))
+
+    if cut_dets:                                                 # ВШИВНЫЕ ДЕТАЛИ: лекало (перёд/зад/гассет) + отверстие
+        from arm import build_detail, place_detail, _detail_main_color
+        from shapely import affinity as _aff
+        import math as _math
+        scale = fig.s * PT2MM
+        for cd in cut_dets:
+            dpoly = _aff.scale(cd["poly_pt"], scale, scale, origin=(0, 0))   # деталь в мм
+            d = build_detail(dpoly, cd["attach_len_pt"] * scale)
+            col = _detail_main_color(page, cd["poly_pt"])        # доминирующий насыщенный цвет детали (не обводка)
+            place_detail(lay, d, list(cd["poly_pt"].exterior.coords)[:-1], col)
+            place_armpit_hole(lay, g, contour_mm, cd["f"], fig, cfg, dy_mm=cd.get("hole_dy", 0.0),
+                              r_override=d["opening"] / (2.0 * _math.pi), hole_list="detail_holes")
 
     if cfg.get("make_spare_arm", True) and (lay.get("arm_pieces") or lay.get("hand_pieces")):
         from arm import add_spare_arm                             # запаска — если есть детали руки (любой путь)
