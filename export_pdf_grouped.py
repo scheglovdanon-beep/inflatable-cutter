@@ -467,13 +467,17 @@ def _rollpack_svg(parts, roll_h, gap, lay, y_off=0.0, suffix="_печать", in
     """КОПИЯ всех деталей (+ инструкция), компактно упакованная в РУЛОН высотой roll_h по
     РЕАЛЬНОЙ ФОРМЕ (polygon-nesting: детали ложатся в вогнутости друг друга) — это САМА ПЕЧАТЬ,
     НИЖЕ фигуры (y_off). Детали-копии двигаются SVG-трансформом. Возвращает (pieces_копии, ширина)."""
-    from pack import nest_shapes
     shapes = []
     for name, _b in parts:
         poly = _poly_for(name, lay)
         if poly is not None and not poly.is_empty:
             shapes.append((name, poly))
-    placements, nested_w = nest_shapes(shapes, roll_h, gap)
+    try:                                                              # плотная укладка по РЕАЛЬНОМУ контуру (NFP)
+        from nest_true import nest_true_shape
+        placements, nested_w = nest_true_shape(shapes, roll_h, gap)
+    except Exception:                                                 # фолбэк на сеточный нестер
+        from pack import nest_shapes
+        placements, nested_w = nest_shapes(shapes, roll_h, gap)
     gy = f'translate(0,{y_off:.3f}) '                                  # весь рулон — ниже фигуры
     out = []
     for name, body in parts:
