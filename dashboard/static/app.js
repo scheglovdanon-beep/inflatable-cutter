@@ -287,7 +287,7 @@ $("#btnBuild").onclick=async()=>{
   busy($("#btnBuild"),true,"добавляю");
   try{
     const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,name:figName(),
-      spare:$("#spare").checked, back_copy:$("#backCopy").checked, arms:S.arms.map(armPayload)};
+      clip_outline:S.clip, spare:$("#spare").checked, back_copy:$("#backCopy").checked, arms:S.arms.map(armPayload)};
     const r=await fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); return; }
     msg("#buildMsg","✓ добавлено в очередь — прогресс в блоке «Очередь сборки» ниже. Можно настроить ещё фигуру.","ok");
