@@ -774,7 +774,7 @@ def main():
 
     if cfg.get("roll_print"):                                          # САМА ПЕЧАТЬ = копия деталей в рулон НИЖЕ фигуры
         roll_h = cfg.get("roll_width_mm", 1440)
-        rgap = 2 * seam_mm_v + 20
+        rgap = cfg.get("roll_print_gap_mm", 2 * seam_mm_v)             # зазор между деталями в колбасе (деф. 20мм)
         y_off = H + 2 * seam_mm_v + 200                                # ниже фигуры
         roll_pieces, roll_W = _rollpack_svg(pieces, roll_h, rgap, lay,   # печать = КОПИЯ тех же деталей (вкл. полосы)
                                             y_off=y_off, inst=inst, inst_bbox=inst_bbox)
