@@ -1,6 +1,6 @@
 "use strict";
 // Состояние мастера. Все точки храним в PT страницы PDF (как в manual_arms).
-const S = { sid:null, meta:null, size:"2700", n:1, ident:false, clip:true,
+const S = { sid:null, meta:null, size:"2700", n:1, ident:false, clip:false,
             hasDetails:false, shoulderRound:false, detailDone:false, detail:{cut:[],width:[],phase:'cut',crop:null},
             arms:[],            // [{f,tip,blade,wrist,elbow}] в PT
             armCrops:[],        // метаданные кропов рук из /api/arm_preview
@@ -105,7 +105,7 @@ async function enterStep3(btn){                 // детект кандидат
   startCut();
 }
 $("#toS3").onclick = () => {
-  S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked; S.clip=true;  // контур всегда по чёрной обводке (без белого фона)
+  S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked; S.clip=$("#clipOutline").checked;  // контур по чёрной обводке (деф. выкл)
   S.hasDetails=$("#hasDetails").checked; S.shoulderRound=$("#shoulderRound").checked; S.detailDone=false; S.detail={cut:[],width:[],phase:'cut',crop:null};
   S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
   S.cands=null;

@@ -107,13 +107,26 @@ def build_contour(drawings, gap_mm: float, target_height_mm: float, exclude_outl
         thr = (cfg or {}).get("contour_outline_black_frac", 0.18)   # обводкой (keyline сверху визуально режет).
         blk = [p for p in (_poly_of(d) for d in drawings            # Обрезаем контур по силуэту near-чёрной
                            if d.get("fill") is not None and sum(d["fill"]) / 3.0 < thr) if p]  # обводки -> по чёрной линии.
+
+        def _polys(geom):                                           # полигоны из ЛЮБОЙ геометрии (GC/Multi/Poly)
+            if geom.is_empty:
+                return []
+            if isinstance(geom, Polygon):
+                return [geom]
+            return [gg for gg in getattr(geom, "geoms", []) if isinstance(gg, Polygon) and not gg.is_empty]
         if blk:
-            ks = unary_union([b.buffer(0) for b in blk])
-            ks_parts = list(ks.geoms) if isinstance(ks, MultiPolygon) else [ks]
-            ksf = max((Polygon(p.exterior) for p in ks_parts), key=lambda p: p.area)  # силуэт обводки без дыр
-            c2 = c.intersection(ksf.buffer(0))
-            if not c2.is_empty:
-                c = max(c2.geoms, key=lambda x: x.area) if isinstance(c2, MultiPolygon) else c2
+            try:
+                ks = unary_union([b.buffer(0) for b in blk])
+                ksp = _polys(ks)
+                if ksp:
+                    ksf = max((Polygon(p.exterior) for p in ksp), key=lambda p: p.area)  # силуэт обводки без дыр
+                    c2p = _polys(c.intersection(ksf.buffer(0)))
+                    if c2p:
+                        cand = max(c2p, key=lambda x: x.area)
+                        if cand.area >= 0.5 * c.area:               # устойчивость: обрезка не должна «съесть» фигуру
+                            c = cand                                # иначе откат к необрезанному (напр. фото-голова)
+            except Exception:
+                pass                                                # при любой ошибке — необрезанный контур
     n_parts = 1 if isinstance(c, Polygon) else len(c.geoms)
     if isinstance(c, MultiPolygon):
         c = max(c.geoms, key=lambda x: x.area)
