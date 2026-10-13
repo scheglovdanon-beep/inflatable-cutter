@@ -106,6 +106,13 @@ def build_layout(page, cfg):
     contour_mm = smooth_front(contour_to_mm(fig), cfg)
     g = build_gusset(contour_mm, cfg); classify_sides(g, contour_mm)
     lay = build_fitting_layout(contour_mm, g, base=build_base(g, cfg))
+    if cfg.get("_shoulder_darts"):                               # пунктир-вытачки плеча: PT -> мм + смещение переда
+        _fmm = fig.s * PT2MM
+        _fb = lay["front"].bounds; _cb = contour_mm.bounds
+        _ddx = _fb[0] - _cb[0]; _ddy = _fb[1] - _cb[1]           # перёд в раскладке мог сместиться
+        lay["shoulder_darts"] = [[(x * _fmm + _ddx, y * _fmm + _ddy) for x, y in dart]
+                                 for dart in cfg["_shoulder_darts"]]
+        cfg.pop("_shoulder_darts", None)
     arm_pts = None
     if cfg.get("make_appendages", True):                         # рука/кисть/запаска (выкл для фигур без руки)
         arm_side = detect_arm_side(page, cfg)

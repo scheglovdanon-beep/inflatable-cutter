@@ -609,10 +609,12 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
             return np.asarray(exc.interpolate(exc.project(_Pt(*p))).coords[0], float)
         cut = []
         from shapely.geometry import LineString as _LS
+        darts = []                                                    # пунктир-вытачки плеча (PT) для отрисовки
         for m in man:
             f = tuple(m["f"]); tip = tuple(m["tip"]); bl = m.get("blade")
+            shA = shB = None                                          # концы хорды реза (для закругления плеча)
             if bl:                                                    # 2 ТОЧКИ: хорда — привязать к контуру + продлить
-                a = _snap(bl[0]); c = _snap(bl[1]); dv = c - a; nn = np.hypot(*dv)
+                a = _snap(bl[0]); c = _snap(bl[1]); shA, shB = a, c; dv = c - a; nn = np.hypot(*dv)
                 if nn > 1:
                     dv = dv / nn; bl = (tuple(a - dv * 40), tuple(c + dv * 40))
             else:                                                    # 1 ТОЧКА: ВЕРТИКАЛЬНЫЙ рез (90° к холсту) от f
@@ -626,6 +628,7 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
                 ups = [p for p in pts if p[1] < fs[1] - 1]           # выше f (y вниз -> меньше y = выше)
                 if ups:
                     up = min(ups, key=lambda p: fs[1] - p[1])        # ближайшая точка контура вверх
+                    shA = np.array([fx, float(fs[1])]); shB = np.array([fx, float(up[1])])
                     bl = ((fx, float(fs[1]) + 40), (fx, float(up[1]) - 40))  # вертикальная хорда, продлённая
             arm_poly, body2 = cut_across_arm(body_pt, f, tip, cfg, blade=bl)
             if arm_poly is None:
@@ -633,10 +636,16 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
                     raise RuntimeError(f"ручной рез руки не удался (f={f}, tip={tip})")
                 continue
             body_pt = body2
+            if cfg.get("shoulder_round") and shA is not None:        # КУПОЛ плеча у шеи (ТЗ)
+                body_pt, dart = round_shoulder(body_pt, shA, shB, cfg)
+                if dart:
+                    darts.append(dart)
             exc = body_pt.exterior                                    # контур изменился после реза
             cut.append({"poly_pt": arm_poly, "f": f, "tip": tip,
                         "wrist": m.get("wrist"), "elbow": m.get("elbow"),  # ручные срезы запястья/локтя (опц.)
                         "hole_dy": m.get("hole_dy", 0.0)})                 # ручной сдвиг отверстия руки (мм)
+        if darts:
+            cfg["_shoulder_darts"] = cfg.get("_shoulder_darts", []) + darts   # PT -> перевести в мм в build_layout
         return body_pt, cut
     if cfg.get("arm_detect_v2"):                                      # v2: вертикальный рез у корня + валидация кистью
         arms2, body2 = detect_arms_v2(page, body_pt, cfg)
@@ -1835,3 +1844,71 @@ def place_detail(layout, det, src_pts, color, gap=120.0):
     layout["sheet_w"] = max(layout["sheet_w"], x)
     layout["sheet_h"] = max(layout["sheet_h"], max(p["poly"].bounds[3] for p in placed) + gap)
     return placed
+
+
+# ============ ЗАКРУГЛЕНИЕ ПЛЕЧА (купол у шеи) при верхнем резе руки — ТЗ_shoulder_round_2d ============
+
+def round_shoulder(body_pt, A, B, cfg):
+    """Заменить ПРЯМУЮ кромку реза плеча A–B на выпуклую дугу-КУПОЛ (полукруг h=d/2),
+    асимметрично смещённую к верхнему концу B (шее). A/B — концы хорды реза (PT, на контуре).
+    Возвращает (new_body_pt, dart_arc_pt) — dart_arc_pt: вогнутая пунктир-вытачка (PT) для отрисовки."""
+    if not cfg.get("shoulder_round"):
+        return body_pt, None
+    from shapely.geometry import Polygon, Point
+    ext = np.asarray(body_pt.exterior.coords, float)[:-1]
+    n = len(ext)
+    if n < 4:
+        return body_pt, None
+    A = np.asarray(A, float); B = np.asarray(B, float)
+    ia = int(np.argmin(np.hypot(ext[:, 0] - A[0], ext[:, 1] - A[1])))
+    ib = int(np.argmin(np.hypot(ext[:, 0] - B[0], ext[:, 1] - B[1])))
+    if ia == ib:
+        return body_pt, None
+
+    def arc_idx(i, j):
+        out = []; k = i
+        while True:
+            out.append(k)
+            if k == j:
+                break
+            k = (k + 1) % n
+            if len(out) > n:
+                break
+        return out
+    f1 = arc_idx(ia, ib); f2 = arc_idx(ib, ia)
+    cut = f1 if len(f1) <= len(f2) else f2            # кромка реза = КОРОТКАЯ дуга A↔B
+    P0 = ext[cut[0]]; P1 = ext[cut[-1]]
+    d = float(np.hypot(*(P1 - P0)))
+    if d < 2:
+        return body_pt, None
+    u = (P1 - P0) / d; nrm = np.array([-u[1], u[0]])
+    cen = body_pt.centroid
+    if np.dot(nrm, (P0 + P1) / 2 - np.array([cen.x, cen.y])) < 0:   # нормаль НАРУЖУ от тела (купол вверх)
+        nrm = -nrm
+    # B (шея) = верхний конец (меньший y). Профиль смещён к B.
+    toB = 1 if P1[1] < P0[1] else 0                    # 1 -> пик у t=1 (P1=B), иначе у t=0
+    h = float(cfg.get("shoulder_dome_frac", 0.5)) * d
+    N = max(12, int(d / 3))
+    dome = []
+    for t in np.linspace(0, 1, N):
+        base = P0 + (P1 - P0) * t
+        w = (0.35 + 0.65 * t) if toB else (0.35 + 0.65 * (1 - t))   # вес к шее (у шеи выше)
+        off = h * math.sin(math.pi * t) * w
+        dome.append(base + nrm * off)
+    # новый контур: длинная дуга (P1..P0) + купол (P0..P1)
+    long_i = arc_idx(cut[-1], cut[0])
+    poly_pts = [tuple(ext[i]) for i in long_i] + [tuple(p) for p in dome[1:]]
+    new = Polygon(poly_pts).buffer(0)
+    if new.geom_type == "MultiPolygon":
+        new = max(new.geoms, key=lambda p: p.area)
+    # пунктир-вытачка: вогнутая дуга ВНУТРЬ (глубина shoulder_seam_frac·d), тот же асимм. профиль
+    sf = float(cfg.get("shoulder_seam_frac", 0.35))
+    dart = None
+    if sf > 0:
+        dart = []
+        for t in np.linspace(0, 1, N):
+            base = P0 + (P1 - P0) * t
+            w = (0.35 + 0.65 * t) if toB else (0.35 + 0.65 * (1 - t))
+            off = sf * d * math.sin(math.pi * t) * w
+            dart.append(tuple(base - nrm * off))       # внутрь тела (минус нормаль)
+    return Polygon(new.exterior), dart
