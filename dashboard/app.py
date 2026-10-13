@@ -537,6 +537,9 @@ def front_preview():
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
         fig = get_front_figure(page, cfg)                            # ЛЁГКИЙ путь: только контур переда (без боковин/днища/руки)
         fig.contour_pt, cut = cut_waving_arms(page, fig.contour_pt, cfg, strict=False)
+        if cfg.get("manual_details"):                                # перёд уже БЕЗ вшивных деталей (как без рук)
+            from arm import cut_details
+            fig.contour_pt, _cd = cut_details(page, fig.contour_pt, cfg, strict=False)
         front = smooth_front(contour_to_mm(fig), cfg)
         ext = front.exterior; L = ext.length
         fmm = fig.s * PT2MM                                          # contour_to_mm = чистый масштаб ×fmm от origin
@@ -545,16 +548,28 @@ def front_preview():
         sc = 1000.0 / max(bx1 - bx0, by1 - by0)
         W = int((bx1 - bx0) * sc + 2 * mg); H = int((by1 - by0) * sc + 2 * mg)
         T = lambda x, y: ((x - bx0) * sc + mg, (y - by0) * sc + mg)
-        segs = []                                                    # отрезки в ПИКСЕЛЯХ (для интерактива)
-        for m in cfg.get("manual_arms", []):
-            pm = Point(m["f"][0] * fmm, m["f"][1] * fmm)             # подмышка в мм
-            P0 = ext.interpolate(ext.project(pm))                   # якорь на контуре
-            dy = float(m.get("hole_dy", 0.0))                       # применённый сдвиг отверстия (мм)
-            s0 = ext.project(Point(P0.x, P0.y + dy))
-            a = substring(ext, max(0.0, s0 - D), s0)
-            b = substring(ext, s0, min(L, s0 + D))
+        segs = []; seg_kinds = []; seg_lens = []                     # отрезки в ПИКСЕЛЯХ (для интерактива) + тип/длина
+        def _seg(fpt, dy, Dmm):                                      # отрезок длины Dmm от якоря fpt вверх
+            pm = Point(fpt[0] * fmm, fpt[1] * fmm)
+            P0 = ext.interpolate(ext.project(pm))
+            s0 = ext.project(Point(P0.x, P0.y + float(dy)))
+            a = substring(ext, max(0.0, s0 - Dmm), s0)               # Dmm в мм (контур в мм)
+            b = substring(ext, s0, min(L, s0 + Dmm))
             seg = a if a.centroid.y <= b.centroid.y else b          # вверх (меньший y)
-            segs.append([list(T(x, y)) for x, y in seg.coords])
+            return [list(T(x, y)) for x, y in seg.coords], Dmm * sc
+        for m in cfg.get("manual_arms", []):
+            pts, lpx = _seg(m["f"], m.get("hole_dy", 0.0), D)
+            segs.append(pts); seg_kinds.append("arm"); seg_lens.append(lpx)
+        for m in cfg.get("manual_details", []):                      # отверстие вшивной детали (своя Ø)
+            bl = m.get("blade")
+            if not bl:
+                continue
+            attach = ((bl[1][0] - bl[0][0]) ** 2 + (bl[1][1] - bl[0][1]) ** 2) ** 0.5 * fmm
+            w = m.get("width")
+            Wd = (((w[1][0] - w[0][0]) ** 2 + (w[1][1] - w[0][1]) ** 2) ** 0.5 * fmm) if w else attach
+            Dd = (2.0 * attach + 2.0 * Wd) / 3.14159265
+            pts, lpx = _seg(m["f"], m.get("hole_dy", 0.0), Dd)
+            segs.append(pts); seg_kinds.append("detail"); seg_lens.append(lpx)
         # контур (упрощённый) в пикселях — для привязки перетаскивания к контуру
         cont_px = [list(T(x, y)) for x, y in front.exterior.simplify(1.5).coords]
         # ТЕКСТУРА переда из макета, обрезанная по контуру, + обводка (БЕЗ отрезков — их рисует клиент)
@@ -574,9 +589,37 @@ def front_preview():
         fn = "front_preview.png"; im.save(os.path.join(d, fn))
         return jsonify(img=f"/api/img/{data['sid']}/{fn}", arms=len(segs), hole_mm=D,
                        W=W, H=H, mm_per_px=1.0 / sc, seg_len_px=D * sc,
-                       contour=cont_px, segments=segs)
+                       contour=cont_px, segments=segs, seg_kinds=seg_kinds, seg_lens=seg_lens)
     except Exception as e:
         return jsonify(error=f"превью переда не удалось: {e}"), 400
+
+
+@app.route("/api/detail_preview", methods=["POST"])
+def detail_preview():
+    """Отрезать вшивную деталь по линии реза (blade) и вернуть её КРОП — чтобы выбрать ширину НА НЕЙ."""
+    data = request.get_json(force=True)
+    sid = data["sid"]; d = _sdir(sid); size = data.get("size", "2700")
+    details = data.get("details", [])
+    try:
+        from sides import get_front_figure
+        from arm import cut_details
+        cfg = _base_cfg(size); _apply_clip_outline(cfg, data.get("clip_outline"))
+        _apply_details(cfg, details)
+        page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
+        fig = get_front_figure(page, cfg)
+        _body, dets = cut_details(page, fig.contour_pt, cfg, strict=True)
+    except Exception as e:
+        return jsonify(error=f"рез детали не удался: {e}"), 400
+    out = []
+    page2 = pymupdf.open(os.path.join(d, "macet.pdf"))[0]
+    for i, cd in enumerate(dets):
+        b = cd["poly_pt"].bounds; pad = 12.0
+        clip = pymupdf.Rect(b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad)
+        pix = page2.get_pixmap(matrix=pymupdf.Matrix(ARM_ZOOM, ARM_ZOOM), clip=clip)
+        fn = f"detail{i}.png"; pix.save(os.path.join(d, fn))
+        out.append({"idx": i, "img": f"/api/img/{sid}/{fn}", "w": pix.width, "h": pix.height,
+                    "zoom": ARM_ZOOM, "ox": float(clip.x0), "oy": float(clip.y0)})
+    return jsonify(details=out, count=len(out))
 
 
 @app.route("/api/arm_layout", methods=["POST"])

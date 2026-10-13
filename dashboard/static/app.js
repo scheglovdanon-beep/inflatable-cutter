@@ -1,7 +1,7 @@
 "use strict";
 // Состояние мастера. Все точки храним в PT страницы PDF (как в manual_arms).
 const S = { sid:null, meta:null, size:"2700", n:1, ident:false, clip:true,
-            hasDetails:false, detailDone:false, detail:{pts:[]},
+            hasDetails:false, detailDone:false, detail:{cut:[],width:[],phase:'cut',crop:null},
             arms:[],            // [{f,tip,blade,wrist,elbow}] в PT
             armCrops:[],        // метаданные кропов рук из /api/arm_preview
             cur:0 };
@@ -106,7 +106,7 @@ async function enterStep3(btn){                 // детект кандидат
 }
 $("#toS3").onclick = () => {
   S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked; S.clip=true;  // контур всегда по чёрной обводке (без белого фона)
-  S.hasDetails=$("#hasDetails").checked; S.detailDone=false; S.detail={pts:[]};
+  S.hasDetails=$("#hasDetails").checked; S.detailDone=false; S.detail={cut:[],width:[],phase:'cut',crop:null};
   S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
   S.cands=null;
   if(S.n===0){ goStep5(); return; }
@@ -208,31 +208,62 @@ function goStep5(){
 }
 function detailsPayload(){                                        // -> [{blade:[2pt], width?:[2pt]}]
   if(!S.hasDetails) return undefined;
-  const p=S.detail.pts||[];
-  if(p.length<2) return undefined;
-  const d={blade:[p[0],p[1]]};
-  if(p.length>=4) d.width=[p[2],p[3]];
+  const c=S.detail.cut||[];
+  if(c.length<2) return undefined;
+  const d={blade:[c[0],c[1]]};
+  if((S.detail.width||[]).length>=2) d.width=[S.detail.width[0],S.detail.width[1]];
+  if(S.detail.holeDy) d.hole_dy=S.detail.holeDy;
   return [d];
 }
-// ---------- ШАГ Детали: вшивные детали (свободные клики) ----------
+// ---------- ШАГ Детали: 2 фазы — рез на фигуре (cut), затем ширина на КРОПЕ детали (width) ----------
 const pickD = new Picker($("#cvD"));
 function startDetail(){
-  show("D");
-  pickD.load(S.meta.img, S.meta, ovD, onPickD);
-  updPromptD();
+  show("D"); S.detail.phase="cut"; if(!S.detail.cut) S.detail.cut=[]; if(!S.detail.width) S.detail.width=[];
+  pickD.load(S.meta.img, S.meta, ovD, onPickD);     // фаза рез — вся фигура
+  updDetailUI();
 }
-function onPickD(pt){ const p=S.detail.pts; if(p.length>=4) return; p.push(pt); pickD.draw(); updPromptD(); }
-function ovD(pk){ const p=S.detail.pts;
-  if(p.length>=2) pk.line(p[0],p[1],"#e4002b");               // линия реза (красным)
-  if(p.length>=4) pk.line(p[2],p[3],"#1560ff");              // ширина (синим)
-  p.forEach((q,i)=> pk.dot(q, i<2?"#e4002b":"#1560ff", String(i+1)));
+function onPickD(pt){
+  if(S.detail.phase==="cut"){ if(S.detail.cut.length>=2) return; S.detail.cut.push(pt); }
+  else { if(S.detail.width.length>=2) return; S.detail.width.push(pt); }
+  pickD.draw(); updDetailUI();
 }
-function updPromptD(){ const n=S.detail.pts.length;
-  const t=["Клик 1: начало линии реза","Клик 2: конец линии реза","Клик 3: начало ширины","Клик 4: конец ширины","Готово — «подтвердить деталь»"][Math.min(n,4)];
-  $("#promptD").textContent=t; }
-$("#undoD").onclick=()=>{ S.detail.pts.pop(); pickD.draw(); updPromptD(); };
-$("#dNext").onclick=()=>{ if(S.detail.pts.length<2){ msg("#sDmsg","нужны хотя бы 2 точки линии реза","err"); return; }
-  S.detailDone=true; msg("#sDmsg","",""); goStep5(); };
+function ovD(pk){
+  if(S.detail.phase==="cut"){ const p=S.detail.cut;
+    if(p.length>=2) pk.line(p[0],p[1],"#e4002b");
+    p.forEach((q,i)=> pk.dot(q,"#e4002b",String(i+1)));
+  } else { const p=S.detail.width;
+    if(p.length>=2) pk.line(p[0],p[1],"#1560ff");
+    p.forEach((q,i)=> pk.dot(q,"#1560ff",String(i+1)));
+  }
+}
+function updDetailUI(){
+  if(S.detail.phase==="cut"){
+    $("#promptD").textContent = S.detail.cut.length<2 ? `Линия реза: клик ${S.detail.cut.length+1} из 2` : "Рез задан — «дальше: ширина →»";
+    $("#dNext").textContent = "дальше: ширина →";
+  } else {
+    $("#promptD").textContent = S.detail.width.length<2 ? `Ширина на детали: клик ${S.detail.width.length+1} из 2` : "Ширина задана — «подтвердить деталь →»";
+    $("#dNext").textContent = "подтвердить деталь →";
+  }
+}
+async function detailToWidth(){                                   // рез -> кроп детали -> фаза ширины
+  msg("#sDmsg","режу деталь…","spin"); busy($("#dNext"),true,"режу");
+  try{
+    const r=await fetch("/api/detail_preview",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,details:[{blade:[S.detail.cut[0],S.detail.cut[1]]}]})});
+    const j=await r.json();
+    if(!r.ok || !(j.details&&j.details.length)){ msg("#sDmsg",j.error||"рез детали не удался","err"); return; }
+    S.detail.crop=j.details[0]; S.detail.phase="width"; S.detail.width=[];
+    msg("#sDmsg","",""); pickD.load(S.detail.crop.img, S.detail.crop, ovD, onPickD);   // КРОП детали
+    updDetailUI();
+  }catch(e){ msg("#sDmsg","ошибка реза детали","err"); }
+  finally{ busy($("#dNext"),false); }
+}
+$("#undoD").onclick=()=>{ const arr=S.detail.phase==="cut"?S.detail.cut:S.detail.width; arr.pop(); pickD.draw(); updDetailUI(); };
+$("#dNext").onclick=()=>{
+  if(S.detail.phase==="cut"){ if(S.detail.cut.length<2){ msg("#sDmsg","нужны 2 точки линии реза","err"); return; } detailToWidth(); return; }
+  if(S.detail.width.length<2){ msg("#sDmsg","нужны 2 точки ширины на детали","err"); return; }
+  S.detailDone=true; msg("#sDmsg","",""); goStep5();
+};
 $("#skipD").onclick=()=>{ S.hasDetails=false; S.detailDone=true; msg("#sDmsg","",""); goStep5(); };
 async function loadArmLayout(){               // #3: полная раскладка руки(рук) справа от ползунка
   const wrap=$("#armLayWrap"), box=$("#armLayImgs");
@@ -254,7 +285,7 @@ const FP = { cv:$("#fpCanvas"), ctx:$("#fpCanvas").getContext("2d"), img:null, d
              scale:1, editing:false, drag:-1, cols:["#e4002b","#1560ff","#10a050","#f58c00"] };
 async function loadFrontPreview(){
   const w=$("#frontPrevWrap");
-  if(S.n===0){ w.style.display="none"; return; }
+  if(S.n===0 && !(S.hasDetails&&S.detailDone)){ w.style.display="none"; return; }
   w.style.display="block"; $("#fpWrap").style.display="none"; $("#fpBtns").style.display="none";
   msg("#frontPrevMsg","строю превью переда (где ляжет рука)…","spin");
   try{
@@ -277,14 +308,19 @@ async function loadFrontPreview(){
 // ---- геометрия контура (длина по дуге) для перетаскивания отрезка ----
 function fpInitGeom(){ const C=FP.data.contour; FP.cum=[0];
   for(let i=1;i<C.length;i++) FP.cum[i]=FP.cum[i-1]+Math.hypot(C[i][0]-C[i-1][0],C[i][1]-C[i-1][1]);
-  FP.total=FP.cum[C.length-1]||1; FP.Lp=FP.data.seg_len_px;
-  FP.s0=[]; FP.s0def=[]; FP.dir=[]; FP.origY=[];
+  FP.total=FP.cum[C.length-1]||1;
+  FP.Lp=FP.data.seg_lens||FP.data.segments.map(()=>FP.data.seg_len_px);     // длина отрезка на каждый сегмент
+  FP.kinds=FP.data.seg_kinds||FP.data.segments.map(()=>"arm");
+  FP.s0=[]; FP.s0def=[]; FP.dir=[]; FP.origY=[]; FP.target=[]; let ai=0;
   FP.data.segments.forEach((seg,i)=>{
-    const a=seg.reduce((m,p)=>p[1]>m[1]?p:m, seg[0]);            // нижняя точка (подмышка)
+    const kind=FP.kinds[i];
+    const tgt = kind==="detail" ? {kind:"detail"} : {kind:"arm", idx:ai++};  // цель: деталь или рука №
+    FP.target[i]=tgt;
+    const a=seg.reduce((m,p)=>p[1]>m[1]?p:m, seg[0]);            // нижняя точка (якорь-подмышка)
     const sa=fpProj(a[0],a[1]);
     FP.dir[i]=(fpAt(sa+6)[1] < fpAt(sa-6)[1]) ? 1 : -1;          // направление «вверх» по дуге (меньший y)
     FP.s0[i]=sa;
-    const hd=(S.arms[i]&&S.arms[i].holeDy)||0;
+    const hd = tgt.kind==="detail" ? (S.detail.holeDy||0) : ((S.arms[tgt.idx]&&S.arms[tgt.idx].holeDy)||0);
     FP.origY[i]=a[1]-hd/FP.data.mm_per_px;                       // дефолтный y якоря
     FP.s0def[i]=fpProj(a[0],FP.origY[i]);                        // дефолтная позиция (для сброса)
   });
@@ -298,14 +334,16 @@ function fpProj(x,y){ const C=FP.data.contour,cum=FP.cum; let bt=0,bd=1e18;  // 
   for(let i=0;i<C.length-1;i++){ const ax=C[i][0],ay=C[i][1],dx=C[i+1][0]-ax,dy=C[i+1][1]-ay,L2=(dx*dx+dy*dy)||1;
     let u=((x-ax)*dx+(y-ay)*dy)/L2; u=Math.max(0,Math.min(1,u)); const px=ax+dx*u,py=ay+dy*u,dd=(px-x)**2+(py-y)**2;
     if(dd<bd){bd=dd; bt=cum[i]+Math.sqrt(L2)*u;} } return bt; }
-function fpSub(s0,dir){ const N=Math.max(8, Math.ceil(FP.Lp/6)); const pts=[];  // ФИКС. длина Lp, равномерная выборка (гладко, с заворотом)
-  for(let k=0;k<=N;k++) pts.push(fpAt(s0 + dir*FP.Lp*k/N)); return pts; }
-function fpRebuild(){ FP.segs=FP.s0.map((s0,i)=>fpSub(s0,FP.dir[i])); fpDraw(); }
+function fpSub(s0,dir,i){ const Lp=FP.Lp[i]; const N=Math.max(8, Math.ceil(Lp/6)); const pts=[];  // длина Lp[i] на сегмент
+  for(let k=0;k<=N;k++) pts.push(fpAt(s0 + dir*Lp*k/N)); return pts; }
+function fpRebuild(){ FP.segs=FP.s0.map((s0,i)=>fpSub(s0,FP.dir[i],i)); fpDraw(); }
 function fpDraw(){ const c=FP.ctx, s=FP.scale; if(!FP.img) return;
   c.clearRect(0,0,FP.cv.width,FP.cv.height); c.drawImage(FP.img,0,0,FP.cv.width,FP.cv.height);
-  FP.segs.forEach((seg,i)=>{ c.strokeStyle=FP.cols[i%4]; c.lineWidth=10; c.lineCap="round"; c.lineJoin="round";
+  FP.segs.forEach((seg,i)=>{ const t=FP.target[i];
+    c.strokeStyle = t.kind==="detail" ? "#8a2be2" : FP.cols[t.idx%4]; c.lineWidth=10; c.lineCap="round"; c.lineJoin="round";
     c.beginPath(); seg.forEach((p,k)=>{ const x=p[0]*s,y=p[1]*s; k?c.lineTo(x,y):c.moveTo(x,y); }); c.stroke();
-    const a=fpAt(FP.s0[i]); c.fillStyle="#000"; c.font="bold 13px sans-serif"; c.fillText("рука "+(i+1), a[0]*s+10, a[1]*s-8); });
+    const a=fpAt(FP.s0[i]); c.fillStyle="#000"; c.font="bold 13px sans-serif";
+    c.fillText(t.kind==="detail"?"деталь":"рука "+(t.idx+1), a[0]*s+10, a[1]*s-8); });
 }
 function fpXY(e){ const r=FP.cv.getBoundingClientRect();
   return [ (e.clientX-r.left)*(FP.cv.width/r.width)/FP.scale, (e.clientY-r.top)*(FP.cv.height/r.height)/FP.scale ]; }
@@ -319,17 +357,19 @@ FP.cv.addEventListener("pointerdown", e=>{ if(!FP.editing) return; const [x,y]=f
 FP.cv.addEventListener("pointermove", e=>{ if(FP.drag<0) return; const [x,y]=fpXY(e);
   let d=fpProj(x,y)-FP.grabArc; d=((d%FP.total)+FP.total)%FP.total; if(d>FP.total/2) d-=FP.total;  // кратчайший сдвиг по кольцу
   const s0=FP.grabS0+d;
-  FP.s0[FP.drag]=s0; FP.segs[FP.drag]=fpSub(s0,FP.dir[FP.drag]); fpDraw(); });
+  FP.s0[FP.drag]=s0; FP.segs[FP.drag]=fpSub(s0,FP.dir[FP.drag],FP.drag); fpDraw(); });
 FP.cv.addEventListener("pointerup", ()=>{ FP.drag=-1; });
 FP.cv.addEventListener("pointercancel", ()=>{ FP.drag=-1; });
 $("#fpEdit").onclick=()=>{ FP.editing=true; $("#fpApply").style.display="inline-flex";
   $("#fpReset").style.display="inline-flex"; $("#fpHint").style.display="block"; FP.cv.style.cursor="grab"; };
-$("#fpReset").onclick=()=>{ FP.s0=FP.s0def.slice(); S.arms.forEach(a=>a.holeDy=0); fpRebuild(); };
+$("#fpReset").onclick=()=>{ FP.s0=FP.s0def.slice(); S.arms.forEach(a=>a.holeDy=0); S.detail.holeDy=0; fpRebuild(); };
 $("#fpApply").onclick=()=>{
-  FP.s0.forEach((s0,i)=>{ const dy=(fpAt(s0)[1]-FP.origY[i])*FP.data.mm_per_px; if(S.arms[i]) S.arms[i].holeDy=dy; });
+  FP.s0.forEach((s0,i)=>{ const dy=(fpAt(s0)[1]-FP.origY[i])*FP.data.mm_per_px; const t=FP.target[i];
+    if(t.kind==="detail") S.detail.holeDy=dy; else if(S.arms[t.idx]) S.arms[t.idx].holeDy=dy; });
   FP.editing=false; FP.cv.style.cursor="default"; $("#fpHint").style.display="none";
-  const ds=S.arms.map(a=>Math.round(a.holeDy||0));
-  msg("#frontPrevMsg",`сдвиг отверстия применён: ${ds.map((v,i)=>`рука ${i+1} ${v>0?"+":""}${v}мм`).join(", ")} — учтётся при сборке`,"ok");
+  const parts=FP.target.map((t,i)=>{ const dy=Math.round((fpAt(FP.s0[i])[1]-FP.origY[i])*FP.data.mm_per_px);
+    return `${t.kind==="detail"?"деталь":"рука "+(t.idx+1)} ${dy>0?"+":""}${dy}мм`; });
+  msg("#frontPrevMsg",`сдвиг отверстия применён: ${parts.join(", ")} — учтётся при сборке`,"ok");
 };
 $("#armNext4").onclick=()=>{ const a=S.arms[S.cur];
   if(a.wrist.length<2||a.elbow.length<2){ msg("#s4msg","нужны по 2 точки на запястье и локоть (или «пропустить»)","err"); return; }
