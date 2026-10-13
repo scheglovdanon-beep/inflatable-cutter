@@ -219,7 +219,10 @@ def build_layout(page, cfg):
         gc.collect()
     color_sides(lay, g, contour_mm, fig, page, front_drawings, cfg)
     seam_mm = cfg.get("seam_allowance_mm", 10)
-    if cfg.get("roll_pack"):                                     # nesting в рулон (высота = ширина рулона)
+    if cfg.get("true_nest"):                                     # True-Shape Nesting (NFP) — по реальному контуру
+        from pack import nest_true_layout
+        nest_true_layout(lay, roll_h=cfg.get("roll_width_mm", 1440), gap=cfg.get("roll_gap_mm", 2 * seam_mm + 10))
+    elif cfg.get("roll_pack"):                                   # nesting в рулон (высота = ширина рулона)
         from pack import nest_roll
         nest_roll(lay, roll_h=cfg.get("roll_width_mm", 1440), gap=cfg.get("roll_gap_mm", 2 * seam_mm + 10))
     elif cfg.get("print_arrange"):                              # печать «в ряд»: запаска|рука|лев|ПЕРЁД|прав|ЗАД, днище вниз

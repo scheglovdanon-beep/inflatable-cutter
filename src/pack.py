@@ -415,6 +415,23 @@ def nest_shapes(shapes, roll_h, gap, rotations=(0, 90, 180, 270)):
     return res, cur_w
 
 
+def nest_true_layout(layout, roll_h=1440.0, gap=30.0):
+    """True-Shape Nesting основной раскладки: укладка по РЕАЛЬНОМУ контуру (NFP) в полосу
+    высотой roll_h. Двигает детали аффином через _units_aff (контуры/цвета/подписи целы).
+    Плотнее, чем nest_roll (rectpack по bbox) / repack_layout (полки по bbox)."""
+    from nest_true import nest_true_shape
+    units = _units_aff(layout)
+    shapes = [(i, u["poly"]) for i, u in enumerate(units) if not u["poly"].is_empty]
+    placements, width = nest_true_shape(shapes, roll_h, gap)
+    for i, u in enumerate(units):
+        M = placements.get(i)
+        if M is not None:
+            u["apply"](M)
+    layout["sheet_w"] = width + gap
+    layout["sheet_h"] = roll_h
+    layout["roll"] = roll_h
+
+
 def repack_layout(layout, gap=80.0, width=None):
     """Разложить все детали по полкам (shelf) без наложений: сортировка по высоте,
     слева-направо, перенос строки при переполнении ширины. Зазор gap между bbox-припусков."""
