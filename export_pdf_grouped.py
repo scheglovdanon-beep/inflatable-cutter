@@ -463,15 +463,52 @@ def _poly_for(name, lay):
     return None
 
 
+def _poly_pool(lay):
+    """name -> СПИСОК полигонов (несколько деталей с ОДНИМ именем: 2 руки дают ruka_plecho ×2).
+    Порядок в списке = порядок добавления деталей в parts -> k-е вхождение имени = k-й полигон."""
+    from shapely.geometry import Polygon as _P, box as _bx
+    from shapely.ops import unary_union
+    from collections import defaultdict
+    pool = defaultdict(list)
+    for nm, p in (lay.get("_tiles") or {}).items():                   # печатные полосы переда/зада
+        pool[nm].append(p)
+    if "front" not in pool:
+        pool["front"].append(lay.get("front_seam") or lay["front"])
+    if lay.get("back") and "back" not in pool:
+        bk = lay["back"]; pool["back"].append(bk.get("seam") or bk["poly"])
+    for s in lay.get("strips", []):
+        pool[f"bokovina_{s['i']}"].append(s.get("seam") or _P(s["poly"]))
+    for p in lay.get("hand_pieces", []):
+        pool[f"kist_{p.get('name')}"].append(p.get("seam") or p["poly"])
+    for p in lay.get("arm_pieces", []):
+        pool[f"ruka_{p.get('name')}"].append(p.get("seam") or p["poly"])
+    for i, p in enumerate(lay.get("spare_arm", [])):                  # запаска — каждая деталь своей группой
+        pool[f"zapasnaya_{i}"].append(p.get("seam") or p["poly"])
+    if lay.get("base"):
+        b = lay["base"]
+        pool["dnishe"].append(b.get("dnishe_seam") or b["dnishe"])
+        lx, ly, lw, lh = b["leg"]; pool["nozhka"].append(b.get("leg_seam") or _bx(lx, ly, lx + lw, ly + lh))
+        for i, tp in enumerate(b.get("transition", [])):
+            pool[f"perehod_{i}"].append(tp)
+    return pool
+
+
 def _rollpack_svg(parts, roll_h, gap, lay, y_off=0.0, suffix="_печать", inst=None, inst_bbox=None):
     """КОПИЯ всех деталей (+ инструкция), компактно упакованная в РУЛОН высотой roll_h по
     РЕАЛЬНОЙ ФОРМЕ (polygon-nesting: детали ложатся в вогнутости друг друга) — это САМА ПЕЧАТЬ,
     НИЖЕ фигуры (y_off). Детали-копии двигаются SVG-трансформом. Возвращает (pieces_копии, ширина)."""
-    shapes = []
-    for name, _b in parts:
-        poly = _poly_for(name, lay)
+    pool = _poly_pool(lay); seen = {}
+    shapes = []                                                       # (idx, poly) — КЛЮЧ ПО ИНДЕКСУ (уникально)
+    for idx, (name, _b) in enumerate(parts):
+        lst = pool.get(name)
+        if not lst:
+            continue
+        k = seen.get(name, 0); seen[name] = k + 1                     # k-е вхождение имени -> k-й полигон (2 руки)
+        if k >= len(lst):
+            continue
+        poly = lst[k]
         if poly is not None and not poly.is_empty:
-            shapes.append((name, poly))
+            shapes.append((idx, poly))
     try:                                                              # плотная укладка по РЕАЛЬНОМУ контуру (NFP)
         from nest_true import nest_true_shape
         placements, nested_w = nest_true_shape(shapes, roll_h, gap)
@@ -480,8 +517,8 @@ def _rollpack_svg(parts, roll_h, gap, lay, y_off=0.0, suffix="_печать", in
         placements, nested_w = nest_shapes(shapes, roll_h, gap)
     gy = f'translate(0,{y_off:.3f}) '                                  # весь рулон — ниже фигуры
     out = []
-    for name, body in parts:
-        M = placements.get(name)
+    for idx, (name, body) in enumerate(parts):
+        M = placements.get(idx)
         if M is None:
             continue
         a, b, d, e, xo, yo = M                                         # shapely affine -> SVG matrix(a,d,b,e,e_x,f_y)
@@ -728,13 +765,12 @@ def main():
     for apc in lay.get("arm_pieces", []):
         pieces.append((f"ruka_{apc.get('name','?')}", _piece_svg(page, apc, "arm", arm_dds, f_mm, lw, nextid(), arm_fill)))
 
-    # ЗАПАСНАЯ РУКА — ВСЕ детали одной группой
+    # ЗАПАСНАЯ РУКА — КАЖДАЯ деталь своей группой (чтобы в рулон укладывались по отдельности,
+    # иначе разбросанная колонка-запаска как единый блок не влезает в 1440). Позиции в раскладке те же.
     spare = lay.get("spare_arm", [])
-    if spare:
-        body = []
-        for p in spare:
-            body += _piece_svg(page, p, p["kind"], arm_dds, f_mm, lw, nextid(), arm_fill, hand_fill)
-        pieces.append(("zapasnaya_ruka", body))
+    for i, p in enumerate(spare):
+        body = _piece_svg(page, p, p["kind"], arm_dds, f_mm, lw, nextid(), arm_fill, hand_fill)
+        pieces.append((f"zapasnaya_{i}", body))
 
     # ДНИЩЕ (+ отверстие) и НОЖКА
     b = lay.get("base")

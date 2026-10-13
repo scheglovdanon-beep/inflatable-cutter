@@ -134,8 +134,10 @@ def nest_true_shape(shapes, roll_h, gap, rotations=(0, 90, 180, 270), orders=Non
     base = []
     for sid, poly in shapes:
         p = poly.buffer(gap / 2.0, join_style=2, quad_segs=2)
-        if isinstance(p, MultiPolygon):
-            p = max(p.geoms, key=lambda g: g.area)
+        if isinstance(p, MultiPolygon):                              # многосоставная деталь (запаска) ->
+            p = p.convex_hull                                        # цельный блок, кладём как одно целое (не теряем части)
+            if isinstance(p, MultiPolygon):
+                p = max(p.geoms, key=lambda g: g.area)
         p = p.simplify(stol, preserve_topology=True)
         t = stol
         while len(p.exterior.coords) > 90 and t < 50:            # адаптивно режем вершины крупных панелей
