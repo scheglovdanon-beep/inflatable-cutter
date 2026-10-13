@@ -948,13 +948,52 @@ def round_gusset_shoulder(layout, cfg):
     pieces = {h["piece"] for h in layout.get("arm_holes", [])}        # полоски с отверстием руки
     if not pieces:
         return
+    strips = layout.get("strips", [])
     darts = []
-    for s in layout.get("strips", []):
-        if s.get("i") in pieces:
-            new_poly, dart, arc_len = _round_strip_top(s["poly"], frac, sfrac)
-            s["poly"] = new_poly
-            s["dome_arc_len"] = arc_len                               # длина дуги купола (для подгонки соседа)
-            if dart:
-                darts.append(dart)
+    for s in strips:
+        if s.get("i") not in pieces:
+            continue
+        new_poly, dart, arc_len = _round_strip_top(s["poly"], frac, sfrac)
+        s["poly"] = new_poly
+        s["dome_arc_len"] = arc_len                                   # длина дуги купола
+        if dart:
+            darts.append(dart)
+        # часть 2: СОСЕДНЯЯ боковина (к шее) — её НИЖНЕЕ ребро под длину дуги, дальше тапер к норме
+        if arc_len > 0 and "arc0" in s and "yn0" in s:
+            flip = s["yn0"] < s["yn1"]
+            top_arc = s["arc1"] if flip else s["arc0"]               # домленный (верхний) конец полоски
+            adj = adj_key = None
+            for t in strips:
+                if t is s or "arc0" not in t:
+                    continue
+                for key in ("arc0", "arc1"):
+                    if abs(t.get(key, -1e9) - top_arc) < 1e-6:
+                        adj, adj_key = t, key; break
+                if adj:
+                    break
+            if adj is not None:
+                _fit_edge_to_len(adj, adj_key, arc_len)
     if darts:
         layout["shoulder_darts"] = layout.get("shoulder_darts", []) + darts
+
+
+def _fit_edge_to_len(strip, at_arc_key, target_len):
+    """Подогнать РЕБРО полоски (у конца at_arc_key) под длину target_len (центрируя);
+    второе ребро не трогаем -> полоска плавно таперится к своему размеру."""
+    poly = [tuple(p) for p in strip.get("poly", [])]
+    if len(poly) < 4:
+        return
+    aflip = strip.get("yn0", 0) < strip.get("yn1", 0)
+    top_is = "arc1" if aflip else "arc0"                              # верх полоски = этот arc-конец
+    edge_top = (at_arc_key == top_is)
+    ys = [p[1] for p in poly]
+    yv = min(ys) if edge_top else max(ys)                            # y нужного ребра (верх/низ)
+    idxs = [i for i, p in enumerate(poly) if abs(p[1] - yv) < 1e-6]
+    if len(idxs) != 2:                                               # только прямое ребро (трапеция)
+        return
+    i0, i1 = idxs
+    left, right = (i0, i1) if poly[i0][0] <= poly[i1][0] else (i1, i0)  # сохранить winding (лево/право)
+    cx = (poly[i0][0] + poly[i1][0]) / 2.0
+    poly[left] = (cx - target_len / 2.0, yv)
+    poly[right] = (cx + target_len / 2.0, yv)
+    strip["poly"] = poly
