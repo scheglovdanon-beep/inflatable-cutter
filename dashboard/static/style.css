@@ -206,3 +206,18 @@ canvas{display:block; cursor:crosshair; max-width:100%; height:auto; border-radi
   .libgrid{grid-template-columns:repeat(auto-fill,minmax(44%,1fr)); gap:10px}
   .libcard img{height:110px}
 }
+
+/* --- крупное превью раскладки в очереди + клик-зум --- */
+.qitem{flex-wrap:wrap}
+.qpreview{flex:1 1 100%; margin-top:10px}
+.qpreview img{width:100%; max-height:62vh; object-fit:contain; background:var(--surface-2); border:1px solid var(--line); border-radius:10px; cursor:zoom-in; display:block}
+.clickpreview, .qthumb.clickpreview, .libcard img.clickpreview{cursor:zoom-in}
+.libcard img.clickpreview:hover{filter:brightness(.96)}
+
+/* --- лайтбокс: раскладка в большом формате --- */
+#lightbox{position:fixed; inset:0; background:rgba(10,14,24,.93); z-index:9999; display:none; align-items:center; justify-content:center; padding:18px}
+#lbStage{width:96vw; height:90vh; position:relative; background:#fff; border-radius:12px; overflow:hidden}
+#lbClose{position:absolute; top:14px; right:18px; z-index:10001; width:46px; height:46px; border:0; border-radius:50%; background:rgba(255,255,255,.16); color:#fff; font-size:22px; line-height:1; cursor:pointer}
+#lbClose:hover{background:rgba(255,255,255,.3)}
+#lbStage .zoomctl{margin:10px 12px 6px}
+#lbStage .zviewport{height:calc(90vh - 62px); border-radius:0}

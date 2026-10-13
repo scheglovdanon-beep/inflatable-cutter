@@ -9,6 +9,22 @@ const S = { sid:null, meta:null, size:"2700", n:1, ident:false, clip:true,
 const KEY = new URLSearchParams(location.search).get("key")
   || (document.cookie.match(/(?:^|; )dash_key=([^;]+)/) || [])[1] || "";
 function imgURL(u){ return u + (u.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(KEY) + "&t=" + Date.now(); }
+function imgURLc(u){ return u + (u.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(KEY); }  // кэшируемый (без t) — для крупных превью
+
+// ---------- Лайтбокс: просмотр раскладки в большом формате (зум/пан) ----------
+function openLightbox(url){
+  let lb=document.getElementById("lightbox");
+  if(!lb){ lb=document.createElement("div"); lb.id="lightbox";
+    lb.innerHTML=`<button id="lbClose" title="закрыть">✕</button><div id="lbStage"></div>`;
+    document.body.appendChild(lb);
+    lb.addEventListener("click", e=>{ if(e.target===lb) closeLightbox(); });
+    document.getElementById("lbClose").onclick=closeLightbox;
+    document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeLightbox(); });
+  }
+  lb.style.display="flex";
+  makeZoomable(document.getElementById("lbStage"), imgURLc(url));     // переиспользуем зум/пан превью
+}
+function closeLightbox(){ const lb=document.getElementById("lightbox"); if(lb) lb.style.display="none"; }
 
 const $ = s => document.querySelector(s);
 const show = n => { document.querySelectorAll(".panel").forEach(p=>p.classList.remove("on"));
@@ -307,13 +323,15 @@ function renderQueue(jobs){
     else if(j.status==="done"){ cls="done"; stat=`готово · за ${fmtT(j.elapsed)}`; pct=100;
       dl=`<div class="qdl"><a class="pdf" href="${imgURL(j.pdf)}" download>Скачать PDF</a>${j.svg?`<a class="svg" href="${imgURL(j.svg)}" download>Скачать SVG</a>`:""}</div>`; }
     else { cls="err"; stat="ошибка: "+esc((j.msg||"").slice(0,180)); }
-    const thumb=j.png;
+    const thumb=j.png, big=(j.status==="done" && thumb);
     it.innerHTML=
-      (thumb?`<img class="qthumb" src="${imgURL(thumb)}">`:`<div class="qthumb"></div>`)+
+      (thumb?`<img class="qthumb${big?" clickpreview":""}" src="${imgURLc(thumb)}"${big?' title="нажмите — открыть в большом формате"':""}>`:`<div class="qthumb"></div>`)+
       `<div class="qbody"><div class="qname">${esc(j.name)}</div>`+
       `<div class="qmeta">${j.size} мм · ${j.n_arms} ${j.n_arms==1?"рука":"руки"}</div>`+
       `<div class="qstat ${cls}">${stat}</div>`+
-      (j.status!=="error"?`<div class="qbar"><i style="width:${pct}%"></i></div>`:"")+dl+`</div>`;
+      (j.status!=="error"?`<div class="qbar"><i style="width:${pct}%"></i></div>`:"")+dl+`</div>`+
+      (big?`<div class="qpreview"><img class="clickpreview" src="${imgURLc(thumb)}" loading="lazy" title="нажмите — открыть в большом формате"></div>`:"");
+    if(big) it.querySelectorAll(".clickpreview").forEach(el=> el.onclick=()=>openLightbox(j.png));
     list.appendChild(it);
   });
 }
@@ -323,9 +341,10 @@ $("#qClear").onclick=async()=>{ await fetch("/api/queue/clear_done",{method:"POS
 function renderGallery(items){
   const g=$("#galGrid"); g.innerHTML="";
   items.forEach(it=>{ const c=document.createElement("div"); c.className="libcard";
-    c.innerHTML=`<img src="${imgURL(it.thumb)}" loading="lazy"><div class="nm">${esc(it.name)}</div>`+
+    c.innerHTML=`<img class="clickpreview" src="${imgURLc(it.thumb)}" loading="lazy" title="нажмите — открыть в большом формате"><div class="nm">${esc(it.name)}</div>`+
       `<div class="badge">${it.size} мм · ${it.n_arms} ${it.n_arms==1?"рука":"руки"}</div>`+
       `<div class="dls">${it.pdf?`<a class="pdf" href="${imgURL(it.pdf)}" download>⬇ PDF</a>`:""}${it.svg?`<a href="${imgURL(it.svg)}" download>⬇ SVG</a>`:""}</div>`;
+    c.querySelector(".clickpreview").onclick=()=>openLightbox(it.preview||it.thumb);
     g.appendChild(c); });
 }
 $("#btnGallery").onclick=async()=>{ const w=$("#galWrap");

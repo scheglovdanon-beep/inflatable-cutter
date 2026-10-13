@@ -532,6 +532,7 @@ def _save_build_catalog(job, d):
         lp = os.path.join(d, "layout.png")
         if os.path.isfile(lp):
             im = Image.open(lp); im.thumbnail((640, 640)); im.save(os.path.join(bd, "thumb.png"))
+            shutil.copy2(lp, os.path.join(bd, "preview.png"))         # полноразмер для просмотра в большом формате
         for f in ("layout.pdf", "layout.svg"):
             if os.path.isfile(os.path.join(d, f)):
                 shutil.copy2(os.path.join(d, f), os.path.join(bd, f))
@@ -663,6 +664,7 @@ def builds_list():
             m = json.load(open(md)); bd = os.path.join(BUILDS, bid)
             items.append({"id": bid, "name": m.get("name"), "size": m.get("size"), "n_arms": m.get("n_arms"),
                           "thumb": f"/api/buildimg/{bid}",
+                          "preview": f"/api/buildpreview/{bid}",      # полноразмер (inline) для лайтбокса
                           "pdf": f"/api/buildfile/{bid}/layout.pdf" if os.path.isfile(os.path.join(bd, "layout.pdf")) else None,
                           "svg": f"/api/buildfile/{bid}/layout.svg" if os.path.isfile(os.path.join(bd, "layout.svg")) else None,
                           "t": os.path.getmtime(md)})
@@ -675,6 +677,18 @@ def builds_list():
 @app.route("/api/buildimg/<bid>")
 def buildimg(bid):
     p = os.path.join(BUILDS, os.path.basename(bid), "thumb.png")
+    if not os.path.isfile(p):
+        abort(404)
+    return send_file(p)
+
+
+@app.route("/api/buildpreview/<bid>")
+def buildpreview(bid):
+    """Полноразмерное превью раскладки INLINE (для лайтбокса). Fallback — thumb.png (старые сборки)."""
+    bd = os.path.join(BUILDS, os.path.basename(bid))
+    p = os.path.join(bd, "preview.png")
+    if not os.path.isfile(p):
+        p = os.path.join(bd, "thumb.png")
     if not os.path.isfile(p):
         abort(404)
     return send_file(p)
