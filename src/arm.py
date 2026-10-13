@@ -662,15 +662,27 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
         arms = sorted(arms, key=_warmth, reverse=True)[:exp]
     if strict and exp is not None and len(arms) != exp:
         raise RuntimeError(f"ожидалось {exp} рук, найдено {len(arms)}")
-    cut = []
+    cut = []; darts = []
     for a in arms:
+        bl = a.get("blade")
+        if cfg.get("shoulder_round") and bl is None:              # нужна хорда реза для купола
+            try:
+                bl = blade_perp(body_pt, a["f"], a["tip"], cfg)
+            except Exception:
+                bl = None
         arm_poly, body2 = cut_across_arm(body_pt, a["f"], a["tip"], cfg, blade=a.get("blade"))
         if arm_poly is None:
             if strict:
                 raise RuntimeError("рез от подмышки не разделил тело — проверь пороги")
             continue
         body_pt = body2
+        if cfg.get("shoulder_round") and bl is not None:         # КУПОЛ плеча у шеи (ТЗ)
+            body_pt, dart = round_shoulder(body_pt, bl[0], bl[1], cfg)
+            if dart:
+                darts.append(dart)
         cut.append({"poly_pt": arm_poly, "f": a["f"], "tip": a["tip"]})
+    if darts:
+        cfg["_shoulder_darts"] = cfg.get("_shoulder_darts", []) + darts
     return body_pt, cut
 
 

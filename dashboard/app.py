@@ -129,13 +129,15 @@ def _apply_details(cfg, details):
     return cfg
 
 
-def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, clip_outline=None, details=None):
+def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, clip_outline=None, details=None, shoulder_round=None):
     """Собрать cfg из выбора пользователя. arms = [{f:[x,y], tip:[x,y], blade?:[[..],[..]],
     wrist?:[[..],[..]], elbow?:[[..],[..]]}] в PT. spare — запасная рука (None=как в базе);
     back_copy — зад=копия переда (симметричная фигура; убирает лишние детали руки у 2-рукой);
     clip_outline — обрезать контур по чёрной обводке (стикер-макеты с запасом заливок)."""
     cfg = _base_cfg(size)
     _apply_clip_outline(cfg, clip_outline)
+    if shoulder_round is not None:                                    # закругление плеча (купол у шеи)
+        cfg["shoulder_round"] = bool(shoulder_round)
     if back_copy is not None:
         cfg["back_from_front"] = bool(back_copy)
     if int(n_arms) <= 0:
@@ -533,7 +535,7 @@ def front_preview():
         arms = _fill_tips(d, size, arms, clip_outline=_co)
         cfg = _build_cfg(size, len(arms), data.get("arms_identical", False), arms,
                          spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co,
-                         details=data.get("details"))
+                         details=data.get("details"), shoulder_round=data.get("shoulder_round"))
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
         fig = get_front_figure(page, cfg)                            # ЛЁГКИЙ путь: только контур переда (без боковин/днища/руки)
         fig.contour_pt, cut = cut_waving_arms(page, fig.contour_pt, cfg, strict=False)
@@ -639,7 +641,7 @@ def arm_layout():
         _co = data.get("clip_outline")
         arms = _fill_tips(d, size, arms, clip_outline=_co)
         cfg = _build_cfg(size, len(arms), ident, arms, spare=data.get("spare"),
-                         back_copy=data.get("back_copy"), clip_outline=_co, details=data.get("details"))
+                         back_copy=data.get("back_copy"), clip_outline=_co, details=data.get("details"), shoulder_round=data.get("shoulder_round"))
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
         _cwd = os.getcwd()
         try:
@@ -808,7 +810,7 @@ def build():
         arms = _fill_tips(d, size, arms, clip_outline=_co)
     cfg = _build_cfg(size, n, data.get("arms_identical", False), arms,
                      spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co,
-                     details=data.get("details"))
+                     details=data.get("details"), shoulder_round=data.get("shoulder_round"))
     jid = uuid.uuid4().hex[:10]
     job = {"id": jid, "sid": sid, "cfg": cfg, "want_svg": bool(data.get("svg", True)),
            "name": (data.get("name") or "макет"), "size": size, "n_arms": n,

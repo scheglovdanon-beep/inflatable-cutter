@@ -1,7 +1,7 @@
 "use strict";
 // Состояние мастера. Все точки храним в PT страницы PDF (как в manual_arms).
 const S = { sid:null, meta:null, size:"2700", n:1, ident:false, clip:true,
-            hasDetails:false, detailDone:false, detail:{cut:[],width:[],phase:'cut',crop:null},
+            hasDetails:false, shoulderRound:false, detailDone:false, detail:{cut:[],width:[],phase:'cut',crop:null},
             arms:[],            // [{f,tip,blade,wrist,elbow}] в PT
             armCrops:[],        // метаданные кропов рук из /api/arm_preview
             cur:0 };
@@ -106,7 +106,7 @@ async function enterStep3(btn){                 // детект кандидат
 }
 $("#toS3").onclick = () => {
   S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked; S.clip=true;  // контур всегда по чёрной обводке (без белого фона)
-  S.hasDetails=$("#hasDetails").checked; S.detailDone=false; S.detail={cut:[],width:[],phase:'cut',crop:null};
+  S.hasDetails=$("#hasDetails").checked; S.shoulderRound=$("#shoulderRound").checked; S.detailDone=false; S.detail={cut:[],width:[],phase:'cut',crop:null};
   S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
   S.cands=null;
   if(S.n===0){ goStep5(); return; }
@@ -273,7 +273,7 @@ async function loadArmLayout(){               // #3: полная расклад
   try{
     const r=await fetch("/api/arm_layout",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,arms_identical:S.ident,
-        spare:$("#spare").checked,back_copy:$("#backCopy").checked,details:detailsPayload(),arms:S.arms.map(armPayload)})});
+        spare:$("#spare").checked,back_copy:$("#backCopy").checked,details:detailsPayload(),shoulder_round:S.shoulderRound,arms:S.arms.map(armPayload)})});
     const j=await r.json();
     if(!(j.images&&j.images.length)){ msg("#armLayMsg",j.error||"раскладка руки недоступна","err"); return; }
     msg("#armLayMsg", j.images.length>1?"2 разные руки":"раскладка руки","ok");
@@ -291,7 +291,7 @@ async function loadFrontPreview(){
   try{
     const r=await fetch("/api/front_preview",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,arms_identical:S.ident,
-        spare:$("#spare").checked,back_copy:$("#backCopy").checked,details:detailsPayload(),arms:S.arms.map(armPayload)})});
+        spare:$("#spare").checked,back_copy:$("#backCopy").checked,details:detailsPayload(),shoulder_round:S.shoulderRound,arms:S.arms.map(armPayload)})});
     const j=await r.json();
     if(!r.ok){ msg("#frontPrevMsg",j.error||"не удалось","err"); return; }
     msg("#frontPrevMsg",`цветом — где ляжет рука (${j.arms} шт., длина = Ø${j.hole_mm} мм отверстия)`,"ok");
@@ -383,7 +383,7 @@ $("#btnBuild").onclick=async()=>{
   busy($("#btnBuild"),true,"добавляю");
   try{
     const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,name:figName(),
-      clip_outline:S.clip, spare:$("#spare").checked, back_copy:$("#backCopy").checked, details:detailsPayload(), arms:S.arms.map(armPayload)};
+      clip_outline:S.clip, spare:$("#spare").checked, back_copy:$("#backCopy").checked, details:detailsPayload(), shoulder_round:S.shoulderRound, arms:S.arms.map(armPayload)};
     const r=await fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); return; }
     msg("#buildMsg","✓ добавлено в очередь — прогресс в блоке «Очередь сборки» ниже. Можно настроить ещё фигуру.","ok");
