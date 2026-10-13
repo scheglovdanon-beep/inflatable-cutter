@@ -325,7 +325,7 @@ def _piece_svg(page, p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill
         fill = ("#%02x%02x%02x" % tuple(int(v) for v in pc)) if pc else arm_fill
         body.append(_poly(list(poly.exterior.coords), fill=fill, stroke="#960096", sw=lw))
     if p.get("seam"):
-        body.append(_poly(list(p["seam"].exterior.coords), stroke="#dc0000", sw=lw))
+        body.append(_poly(list(p["seam"].exterior.coords), stroke="#000000", sw=lw))
     return body
 
 
@@ -634,7 +634,7 @@ def main():
         if not tl:                                                    # целиком
             pieces.append((prefix, [_design_raster(page, src_bbox, tf, panel_poly, nextid()),
                                     _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw),
-                                    _poly(list(panel_seam.exterior.coords), stroke="#dc0000", sw=lw),
+                                    _poly(list(panel_seam.exterior.coords), stroke="#000000", sw=lw),
                                     _arc_paths(arcs, panel_poly, f"seam_{prefix}")]))
             return
         cursor = None
@@ -645,7 +645,7 @@ def main():
             dx = cursor - ts.bounds[0]                                # сдвиг так, чтобы полосы легли В РЯД с зазором
             body = [_design_raster(page, src_bbox, tf, tp, nextid()),
                     _poly(list(tp.exterior.coords), stroke="#000", sw=lw),
-                    _poly(list(ts.exterior.coords), stroke="#dc0000", sw=lw),
+                    _poly(list(ts.exterior.coords), stroke="#000000", sw=lw),
                     _arc_paths(_clip_arcs_x(arcs, bx0, bx1), tp, f"seam_{nm}")]   # цветовые маркеры в припуске
             if abs(dx) > 1e-6:                                        # та же деталь, просто сдвинута РЯДОМ
                 body = [f'<g transform="translate({dx:.3f},0)">'] + body + ["</g>"]
@@ -695,16 +695,16 @@ def main():
             body.append(f'<path d="{d}" fill="none" stroke="{keycol}" stroke-width="{sw_seam}" stroke-linecap="round"/>')
         body.append(_poly(list(s["poly"]), stroke="#000", sw=lw))      # контур детали — чёрный
         if s.get("seam"):
-            body.append(_poly(list(s["seam"].exterior.coords), stroke="#dc0000", sw=lw))
+            body.append(_poly(list(s["seam"].exterior.coords), stroke="#000000", sw=lw))
         if ah and ah.get("piece") == s["i"]:
-            body.append(_circle(ah["cx"], ah["cy"], ah["r"], "#dc0000", lw))
+            body.append(_circle(ah["cx"], ah["cy"], ah["r"], "#000000", lw))
             if ah.get("seam_r"):
-                body.append(_circle(ah["cx"], ah["cy"], ah["seam_r"], "#dc0000", lw))
+                body.append(_circle(ah["cx"], ah["cy"], ah["seam_r"], "#000000", lw))
         for h in lay.get("arm_holes", []):                            # отверстия рук (список) на своей боковине
             if h.get("piece") == s["i"]:
-                body.append(_circle(h["cx"], h["cy"], h["r"], "#dc0000", lw))
+                body.append(_circle(h["cx"], h["cy"], h["r"], "#000000", lw))
                 if h.get("seam_r"):
-                    body.append(_circle(h["cx"], h["cy"], h["seam_r"], "#dc0000", lw))
+                    body.append(_circle(h["cx"], h["cy"], h["seam_r"], "#000000", lw))
         pieces.append((f"bokovina_{s['i']}", body))
 
     # ЗАКРУГЛЕНИЕ ПЛЕЧА: пунктир-вытачка + метки заход|d/1.7|заход на куполе боковины
@@ -719,7 +719,7 @@ def main():
             r = 6.0
             sh_body.append(f'<path d="M {mx-r:.2f},{my-r:.2f} L {mx+r:.2f},{my+r:.2f} '
                            f'M {mx-r:.2f},{my+r:.2f} L {mx+r:.2f},{my-r:.2f}" '
-                           f'fill="none" stroke="#ff00ff" stroke-width="{max(lw, 1.5):.2f}"/>')
+                           f'fill="none" stroke="#46283c" stroke-width="{max(lw, 1.5):.2f}"/>')
     if sh_body:
         pieces.append(("plecho_razmetka", sh_body))
 
@@ -743,11 +743,11 @@ def main():
     if b:
         db = [_poly(list(b["dnishe"].exterior.coords), fill=base_fill, stroke="#000", sw=lw)]
         fx, fy = b["fan_c"]; r = b["fan_d"] / 2
-        db.append(_circle(fx, fy, r, "#dc0000", lw))
+        db.append(_circle(fx, fy, r, "#000000", lw))
         if b.get("fan_seam_r"):
-            db.append(_circle(fx, fy, b["fan_seam_r"], "#dc0000", lw))
+            db.append(_circle(fx, fy, b["fan_seam_r"], "#000000", lw))
         if b.get("dnishe_seam"):
-            db.append(_poly(list(b["dnishe_seam"].exterior.coords), stroke="#dc0000", sw=lw))
+            db.append(_poly(list(b["dnishe_seam"].exterior.coords), stroke="#000000", sw=lw))
         pieces.append(("dnishe", db))
         if b.get("leg_poly") is not None:                            # ножка повёрнута (nesting)
             leg_pts = list(b["leg_poly"].exterior.coords)
@@ -756,7 +756,7 @@ def main():
             leg_pts = [(lx, ly), (lx + lwd, ly), (lx + lwd, ly + lh), (lx, ly + lh)]
         lb = [_poly(leg_pts, fill=base_fill, stroke="#000", sw=lw)]
         if b.get("leg_seam"):
-            lb.append(_poly(list(b["leg_seam"].exterior.coords), stroke="#dc0000", sw=lw))
+            lb.append(_poly(list(b["leg_seam"].exterior.coords), stroke="#000000", sw=lw))
         pieces.append(("nozhka", lb))
         for ti, tp in enumerate(b.get("transition", [])):               # переход-воронка Ø300->Ø460 (4 части)
             pieces.append((f"perehod_{ti}", [_poly(list(tp.exterior.coords), fill=base_fill, stroke="#000", sw=lw)]))

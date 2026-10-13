@@ -9,9 +9,9 @@ import cv2
 
 
 def _palette(i, n=14):
-    """Различимый цвет по индексу детали (одинаковый для дуги контура и полосы)."""
+    """Различимый, но ТЁМНЫЙ ТУСКЛЫЙ цвет-ключ места сшива (яркие просвечивают ткань)."""
     h = (i * 0.61803398875) % 1.0                      # золотое сечение — цвета не повторяются
-    r, g, b = colorsys.hsv_to_rgb(h, 0.85, 0.85)
+    r, g, b = colorsys.hsv_to_rgb(h, 0.5, 0.42)        # низкая насыщенность/яркость -> тёмный тусклый
     return (int(r * 255), int(g * 255), int(b * 255))
 from shapely.geometry import LineString, Point, MultiPolygon
 from shapely.ops import unary_union

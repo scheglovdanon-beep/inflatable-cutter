@@ -154,7 +154,7 @@ def main():
         dr.polygon([T(x, y) for x, y in b["dnishe"].exterior.coords], fill=base_col, outline=(0, 0, 0))
         label(b["dnishe"], "DNISHE")
         fx, fy = b["fan_c"]; r = b["fan_d"] / 2
-        dr.ellipse([T(fx - r, fy - r), T(fx + r, fy + r)], outline=(220, 0, 0), width=lw)
+        dr.ellipse([T(fx - r, fy - r), T(fx + r, fy + r)], outline=(0, 0, 0), width=lw)
         if b.get("leg_poly") is not None:                           # ножка повёрнута (nesting)
             dr.polygon([T(x, y) for x, y in b["leg_poly"].exterior.coords], fill=base_col, outline=(0, 0, 0))
             label(b["leg_poly"], "NOZHKA")
@@ -165,13 +165,13 @@ def main():
     ah = lay.get("arm_hole")
     if ah:
         dr.ellipse([T(ah["cx"] - ah["r"], ah["cy"] - ah["r"]), T(ah["cx"] + ah["r"], ah["cy"] + ah["r"])],
-                   outline=(220, 0, 0), width=lw)
+                   outline=(0, 0, 0), width=lw)
     for ah in lay.get("arm_holes", []):                             # отверстия рук (по одному на руку)
         dr.ellipse([T(ah["cx"] - ah["r"], ah["cy"] - ah["r"]), T(ah["cx"] + ah["r"], ah["cy"] + ah["r"])],
-                   outline=(220, 0, 0), width=lw)
+                   outline=(0, 0, 0), width=lw)
     for dh in lay.get("detail_holes", []):                          # отверстия вшивных деталей
         dr.ellipse([T(dh["cx"] - dh["r"], dh["cy"] - dh["r"]), T(dh["cx"] + dh["r"], dh["cy"] + dh["r"])],
-                   outline=(0, 120, 220), width=lw)
+                   outline=(30, 40, 70), width=lw)
     for dart in lay.get("shoulder_darts", []):                      # пунктир-вытачка плеча (купол у шеи)
         dpx = [T(x, y) for x, y in dart]
         for i in range(0, len(dpx) - 1, 2):                         # пунктир: через сегмент
@@ -179,8 +179,8 @@ def main():
     for mk in lay.get("shoulder_apex_marks", []):                   # метки заход|d/1.7|заход на куполе
         for (mx, my) in mk:
             px, py = T(mx, my)
-            dr.line([(px - 9, py - 9), (px + 9, py + 9)], fill=(255, 0, 255), width=max(2, lw))
-            dr.line([(px - 9, py + 9), (px + 9, py - 9)], fill=(255, 0, 255), width=max(2, lw))
+            dr.line([(px - 9, py - 9), (px + 9, py + 9)], fill=(70, 40, 70), width=max(2, lw))
+            dr.line([(px - 9, py + 9), (px + 9, py - 9)], fill=(70, 40, 70), width=max(2, lw))
 
     # ----- РУКА (база/плечо/предплечье) — цвет зоны, либо ПОЛОСЫ текстуры вдоль руки + подпись -----
     for ap in lay.get("arm_pieces", []):
@@ -264,7 +264,7 @@ def main():
             render_piece(dp["poly"], "hand", dp.get("src"))
         else:
             dr.polygon([T(x, y) for x, y in dp["poly"].exterior.coords],
-                       fill=tuple(dp.get("fill") or (200, 200, 200)), outline=(0, 120, 220))
+                       fill=tuple(dp.get("fill") or (200, 200, 200)), outline=(30, 40, 70))
         label(dp["poly"], dp.get("name", ""))
     import gc; gc.collect()                                          # освободить накопленные слои деталей
 
@@ -273,19 +273,19 @@ def main():
     seam_mm = cfg.get("seam_allowance_mm", 10)
     add_seams(lay, seam_mm)
     for ring in seam_rings(lay):
-        dr.line([T(x, y) for x, y in ring], fill=(220, 0, 0), width=lw)
+        dr.line([T(x, y) for x, y in ring], fill=(0, 0, 0), width=lw)
     b2 = lay.get("base")                                            # отверстия: припуск внутрь
     if b2 and b2.get("fan_seam_r"):
         fx, fy = b2["fan_c"]; r = b2["fan_seam_r"]
-        dr.ellipse([T(fx - r, fy - r), T(fx + r, fy + r)], outline=(220, 0, 0), width=lw)
+        dr.ellipse([T(fx - r, fy - r), T(fx + r, fy + r)], outline=(0, 0, 0), width=lw)
     ah2 = lay.get("arm_hole")
     if ah2 and ah2.get("seam_r"):
         r = ah2["seam_r"]; cx, cy = ah2["cx"], ah2["cy"]
-        dr.ellipse([T(cx - r, cy - r), T(cx + r, cy + r)], outline=(220, 0, 0), width=lw)
+        dr.ellipse([T(cx - r, cy - r), T(cx + r, cy + r)], outline=(0, 0, 0), width=lw)
     for ah2 in lay.get("arm_holes", []):
         if ah2.get("seam_r"):
             r = ah2["seam_r"]; cx, cy = ah2["cx"], ah2["cy"]
-            dr.ellipse([T(cx - r, cy - r), T(cx + r, cy + r)], outline=(220, 0, 0), width=lw)
+            dr.ellipse([T(cx - r, cy - r), T(cx + r, cy + r)], outline=(0, 0, 0), width=lw)
     dr.text((M, 10), f"kontury {cfg.get('line_width_mm',0.2)} mm sploshnye | pripusk +{seam_mm:.0f} mm", fill=(0, 0, 0))
 
     out_png = getattr(args, "out", None) or "out/texture_view.png"
