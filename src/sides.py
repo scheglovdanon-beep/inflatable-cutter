@@ -1013,11 +1013,11 @@ def shoulder_overlays(layout, cfg):
         mid = _split_polyline_by_len(arc, fa, fb)
         right = _split_polyline_by_len(arc, fb, 1.0)
         if len(left) >= 2:
-            segs.append({"pts": left, "rgb": col_self, "role": "zahod_front"})
+            segs.append({"pts": left, "rgb": col_self, "role": "zahod_front", "i": s["i"]})
         if len(mid) >= 2:
-            segs.append({"pts": mid, "rgb": col_adj, "role": "mid_adj"})
+            segs.append({"pts": mid, "rgb": col_adj, "role": "mid_adj", "i": s["i"]})
         if len(right) >= 2:
-            segs.append({"pts": right, "rgb": col_self, "role": "zahod_back"})
+            segs.append({"pts": right, "rgb": col_self, "role": "zahod_back", "i": s["i"]})
     if segs:
         layout["shoulder_arc_segments"] = segs
 
