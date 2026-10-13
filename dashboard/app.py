@@ -231,6 +231,20 @@ def _auto_tip(poly_pt, f):
     return [float(p[0]), float(p[1])]
 
 
+def _tip_from_blade(poly_pt, f):
+    """Кончик кисти для ХОРДОВОГО реза: самая дальняя точка контура в РАДИАЛЬНОМ направлении
+    наружу (от центра тела через подмышку f). Это кисть боковой руки — устойчиво, не хватает
+    ложку/верх/ногу (farthest-from-f брал ложку, нормаль к хорде — ногу)."""
+    import numpy as np
+    cen = poly_pt.centroid
+    u = np.array([f[0] - cen.x, f[1] - cen.y], float)                 # центр -> подмышка = ось руки наружу
+    nn = np.linalg.norm(u) or 1.0; u = u / nn
+    exr = np.asarray(poly_pt.exterior.coords, float)
+    proj = (exr - np.asarray(f, float)) @ u                            # дальше всего ВДОЛЬ оси наружу = кисть
+    p = exr[int(proj.argmax())]
+    return [float(p[0]), float(p[1])]
+
+
 def _fill_tips(d, size, arms, clip_outline=None):
     """Досчитать tip тем рукам, у кого он не задан. tip = кончик кисти от БЛИЖАЙШЕЙ задетектированной
     руки (detect_armpits даёт корректный кончик); fallback — самая дальняя точка контура от f."""
@@ -249,6 +263,9 @@ def _fill_tips(d, size, arms, clip_outline=None):
         det = []
     for a in arms:
         if a.get("tip") or not a.get("f"):
+            continue
+        if a.get("blade"):                                            # хордовый рез: кончик радиально наружу
+            a["tip"] = _tip_from_blade(fig.contour_pt, a["f"])        # (надёжно для боковых рук стаканов)
             continue
         f = np.asarray(a["f"], float)
         if det:
