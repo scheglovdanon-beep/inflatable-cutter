@@ -98,11 +98,21 @@ def _base_cfg(size):
     return cfg
 
 
-def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None):
+def _apply_clip_outline(cfg, clip_outline):
+    """Обрезка контура по чёрной обводке (стикер-макеты: цветные заливки нарисованы с запасом
+    за keyline). None = не трогать (как в базе); True/False — задать явно из UI."""
+    if clip_outline is not None:
+        cfg["contour_clip_outline"] = bool(clip_outline)
+    return cfg
+
+
+def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, clip_outline=None):
     """Собрать cfg из выбора пользователя. arms = [{f:[x,y], tip:[x,y], blade?:[[..],[..]],
     wrist?:[[..],[..]], elbow?:[[..],[..]]}] в PT. spare — запасная рука (None=как в базе);
-    back_copy — зад=копия переда (симметричная фигура; убирает лишние детали руки у 2-рукой)."""
+    back_copy — зад=копия переда (симметричная фигура; убирает лишние детали руки у 2-рукой);
+    clip_outline — обрезать контур по чёрной обводке (стикер-макеты с запасом заливок)."""
     cfg = _base_cfg(size)
+    _apply_clip_outline(cfg, clip_outline)
     if back_copy is not None:
         cfg["back_from_front"] = bool(back_copy)
     if int(n_arms) <= 0:
@@ -221,7 +231,7 @@ def _auto_tip(poly_pt, f):
     return [float(p[0]), float(p[1])]
 
 
-def _fill_tips(d, size, arms):
+def _fill_tips(d, size, arms, clip_outline=None):
     """Досчитать tip тем рукам, у кого он не задан. tip = кончик кисти от БЛИЖАЙШЕЙ задетектированной
     руки (detect_armpits даёт корректный кончик); fallback — самая дальняя точка контура от f."""
     if all(a.get("tip") for a in arms):
@@ -230,6 +240,7 @@ def _fill_tips(d, size, arms):
     from sides import get_front_figure
     from arm import detect_armpits
     cfg = _base_cfg(size); cfg["arm_cut"] = "armpit"; cfg["expected_arms"] = len(arms)
+    _apply_clip_outline(cfg, clip_outline)
     page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
     fig = get_front_figure(page, cfg)
     try:
@@ -345,6 +356,7 @@ def detect():
         from arm import detect_armpits, blade_perp
         from side_color import arm_fill_color
         cfg = _base_cfg(size)
+        _apply_clip_outline(cfg, data.get("clip_outline"))
         cfg["arm_cut"] = "armpit"
         cfg["expected_arms"] = n
         cfg.pop("arm_detect_v2", None)                                 # для подсказки используем контурный детект (даёт f/tip/blade)
@@ -385,6 +397,7 @@ def candidates():
     try:
         from sides import get_front_figure
         cfg = _base_cfg(size); cfg["arm_cut"] = "none"
+        _apply_clip_outline(cfg, data.get("clip_outline"))
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
         fig = get_front_figure(page, cfg)
         keep = _root_candidates(fig.contour_pt, int(data.get("n", 12)))
@@ -406,8 +419,9 @@ def arm_preview():
     try:
         from sides import get_front_figure
         from arm import cut_waving_arms
-        arms = _fill_tips(d, size, arms)                              # авто-кончик, если не задан
-        cfg = _build_cfg(size, len(arms), False, arms)
+        _co = data.get("clip_outline")
+        arms = _fill_tips(d, size, arms, clip_outline=_co)            # авто-кончик, если не задан
+        cfg = _build_cfg(size, len(arms), False, arms, clip_outline=_co)
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]
         page._cfg = cfg
         fig = get_front_figure(page, cfg)
@@ -444,9 +458,10 @@ def front_preview():
         from shapely.ops import substring
         from sides import PT2MM, get_front_figure, contour_to_mm, smooth_front
         from arm import cut_waving_arms
-        arms = _fill_tips(d, size, arms)
+        _co = data.get("clip_outline")
+        arms = _fill_tips(d, size, arms, clip_outline=_co)
         cfg = _build_cfg(size, len(arms), data.get("arms_identical", False), arms,
-                         spare=data.get("spare"), back_copy=data.get("back_copy"))
+                         spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co)
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
         fig = get_front_figure(page, cfg)                            # ЛЁГКИЙ путь: только контур переда (без боковин/днища/руки)
         fig.contour_pt, cut = cut_waving_arms(page, fig.contour_pt, cfg, strict=False)
@@ -569,10 +584,11 @@ def build():
     data = request.get_json(force=True)
     sid = data["sid"]; d = _sdir(sid)
     size = data.get("size", "2700"); n = int(data.get("n_arms", 0)); arms = data.get("arms", [])
+    _co = data.get("clip_outline")
     if n > 0:
-        arms = _fill_tips(d, size, arms)
+        arms = _fill_tips(d, size, arms, clip_outline=_co)
     cfg = _build_cfg(size, n, data.get("arms_identical", False), arms,
-                     spare=data.get("spare"), back_copy=data.get("back_copy"))
+                     spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co)
     jid = uuid.uuid4().hex[:10]
     job = {"id": jid, "sid": sid, "cfg": cfg, "want_svg": bool(data.get("svg", True)),
            "name": (data.get("name") or "макет"), "size": size, "n_arms": n,

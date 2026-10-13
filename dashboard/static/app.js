@@ -1,6 +1,6 @@
 "use strict";
 // Состояние мастера. Все точки храним в PT страницы PDF (как в manual_arms).
-const S = { sid:null, meta:null, size:"2700", n:1, ident:false,
+const S = { sid:null, meta:null, size:"2700", n:1, ident:false, clip:true,
             arms:[],            // [{f,tip,blade,wrist,elbow}] в PT
             armCrops:[],        // метаданные кропов рук из /api/arm_preview
             cur:0 };
@@ -77,7 +77,7 @@ async function enterStep3(btn){                 // детект кандидат
   show(3); S.cur=0; msg("#s3msg","ищу кандидатные точки на макете…","spin");
   try {
     const r=await fetch("/api/candidates",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({sid:S.sid,size:S.size})});
+      body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip})});
     const j=await r.json(); S.cands = j.pts || [];
     if(S.cands.length){ msg("#s3msg",`найдено ${S.cands.length} точек. Выберите подмышку (и верх плеча для хорды).`,"ok"); }
     else { msg("#s3msg","кандидаты не найдены — попробуйте другой размер/макет.","err"); }
@@ -86,7 +86,7 @@ async function enterStep3(btn){                 // детект кандидат
   startCut();
 }
 $("#toS3").onclick = () => {
-  S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked;
+  S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked; S.clip=$("#clipOutline").checked;
   S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
   S.cands=null;
   if(S.n===0){ goStep5(); return; }
@@ -139,7 +139,7 @@ $("#armNext").onclick=async()=>{ const a=S.arms[S.cur];
   busy($("#armNext"),true,"проверяю рез"); msg("#s3msg","проверяю рез и готовлю руку…","spin");
   try{
     const r=await fetch("/api/arm_preview",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({sid:S.sid,size:S.size,arms:S.arms.map(armPayload)})});
+      body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,arms:S.arms.map(armPayload)})});
     const j=await r.json();
     if(!r.ok){ msg("#s3msg",j.error,"err"); return; }
     msg("#s3msg","","");  S.armCrops=j.arms; S.cur=0; startHand();
@@ -187,7 +187,7 @@ async function loadFrontPreview(){
   msg("#frontPrevMsg","строю превью переда (где ляжет рука)…","spin");
   try{
     const r=await fetch("/api/front_preview",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({sid:S.sid,size:S.size,arms_identical:S.ident,
+      body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,arms_identical:S.ident,
         spare:$("#spare").checked,back_copy:$("#backCopy").checked,arms:S.arms.map(armPayload)})});
     const j=await r.json();
     if(!r.ok){ msg("#frontPrevMsg",j.error||"не удалось","err"); return; }
@@ -426,7 +426,7 @@ $("#editArm").onclick = () => {                 // заново задетект
 $("#editHand").onclick = async () => {          // заново задетектить кисть/предплечье (переразметка)
   S.cur=0; busy($("#editHand"),true,"готовлю"); msg("#buildMsg","готовлю руку для переразметки…","spin");
   try{ const r=await fetch("/api/arm_preview",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({sid:S.sid,size:S.size,arms:S.arms.map(armPayload)})});
+      body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,arms:S.arms.map(armPayload)})});
     const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error,"err"); return; }
     S.armCrops=j.arms; S.arms.forEach(a=>{ a.wrist=[]; a.elbow=[]; }); msg("#buildMsg","",""); startHand();
   }catch(e){ msg("#buildMsg","ошибка подготовки руки","err"); }
