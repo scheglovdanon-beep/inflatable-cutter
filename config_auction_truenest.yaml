@@ -116,4 +116,5 @@ union_batch_size: 300
 true_nest: true
 roll_pack: false
 print_arrange: false
+roll_print: false                      # без отдельного печатного рулона — ВСЁ в одну колбасу
 roll_width_mm: 1440
