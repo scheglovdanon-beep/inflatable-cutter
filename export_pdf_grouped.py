@@ -382,87 +382,6 @@ def _instruction(pieces, lay, W, H, x0, y0, scale, font_mm):
     return out
 
 
-def _bbox_for(name, lay):
-    """bbox детали (с припуском, если есть) в координатах раскладки — для рулонной упаковки."""
-    from shapely.geometry import Polygon as _P, box as _bx
-    if lay.get("_tiles") and name in lay["_tiles"]:                    # печатная полоса переда/зада
-        return lay["_tiles"][name].bounds
-    if name == "front":
-        return (lay.get("front_seam") or lay["front"]).bounds
-    if name == "back" and lay.get("back"):
-        bk = lay["back"]; return (bk.get("seam") or bk["poly"]).bounds
-    if name.startswith("bokovina_"):
-        i = int(name.split("_")[1])
-        for s in lay.get("strips", []):
-            if s["i"] == i:
-                return (s.get("seam") or _P(s["poly"])).bounds
-    if name.startswith("kist_"):
-        nm = name[5:]
-        for p in lay.get("hand_pieces", []):
-            if str(p.get("name")) == nm:
-                return (p.get("seam") or p["poly"]).bounds
-    if name.startswith("ruka_"):
-        nm = name[5:]
-        for p in lay.get("arm_pieces", []):
-            if str(p.get("name")) == nm:
-                return (p.get("seam") or p["poly"]).bounds
-    if name == "zapasnaya_ruka":
-        xs, ys = [], []
-        for p in lay.get("spare_arm", []):
-            b = (p.get("seam") or p["poly"]).bounds; xs += [b[0], b[2]]; ys += [b[1], b[3]]
-        return (min(xs), min(ys), max(xs), max(ys)) if xs else None
-    if name == "dnishe" and lay.get("base"):
-        b = lay["base"]; return (b.get("dnishe_seam") or b["dnishe"]).bounds
-    if name == "nozhka" and lay.get("base"):
-        b = lay["base"]; lx, ly, lw, lh = b["leg"]
-        return (b.get("leg_seam") or _bx(lx, ly, lx + lw, ly + lh)).bounds
-    if name.startswith("perehod_") and lay.get("base"):
-        tr = lay["base"].get("transition", [])
-        i = int(name.split("_")[1])
-        return tr[i].bounds if i < len(tr) else None
-    return None
-
-
-def _poly_for(name, lay):
-    """Реальный полигон-контур детали (seam, если есть) — для полигонального нестинга."""
-    from shapely.geometry import Polygon as _P, box as _bx
-    from shapely.ops import unary_union
-    if lay.get("_tiles") and name in lay["_tiles"]:                    # печатная полоса переда/зада
-        return lay["_tiles"][name]
-    if name == "front":
-        return lay.get("front_seam") or lay["front"]
-    if name == "back" and lay.get("back"):
-        bk = lay["back"]; return bk.get("seam") or bk["poly"]
-    if name.startswith("bokovina_"):
-        i = int(name.split("_")[1])
-        for s in lay.get("strips", []):
-            if s["i"] == i:
-                return s.get("seam") or _P(s["poly"])
-    if name.startswith("kist_"):
-        nm = name[5:]
-        for p in lay.get("hand_pieces", []):
-            if str(p.get("name")) == nm:
-                return p.get("seam") or p["poly"]
-    if name.startswith("ruka_"):
-        nm = name[5:]
-        for p in lay.get("arm_pieces", []):
-            if str(p.get("name")) == nm:
-                return p.get("seam") or p["poly"]
-    if name == "zapasnaya_ruka":
-        geoms = [(p.get("seam") or p["poly"]) for p in lay.get("spare_arm", [])]
-        return unary_union(geoms) if geoms else None
-    if name == "dnishe" and lay.get("base"):
-        b = lay["base"]; return b.get("dnishe_seam") or b["dnishe"]
-    if name == "nozhka" and lay.get("base"):
-        b = lay["base"]; lx, ly, lw, lh = b["leg"]
-        return b.get("leg_seam") or _bx(lx, ly, lx + lw, ly + lh)
-    if name.startswith("perehod_") and lay.get("base"):               # детали перехода 300->460
-        tr = lay["base"].get("transition", [])
-        i = int(name.split("_")[1])
-        return tr[i] if i < len(tr) else None
-    return None
-
-
 def _poly_pool(lay):
     """name -> СПИСОК полигонов (несколько деталей с ОДНИМ именем: 2 руки дают ruka_plecho ×2).
     Порядок в списке = порядок добавления деталей в parts -> k-е вхождение имени = k-й полигон."""
@@ -644,7 +563,7 @@ def main():
     # отрисовки. Дуги-маркеры стыка с боковинами режутся по X-зоне полосы (_clip_arcs_x).
     from shapely import affinity as _aff
     fr_bbox = fig.contour_pt.bounds                                   # bbox КОНТУРА (покрывает всю панель, без зазоров)
-    lay["_tiles"] = {}                                                 # tilename -> seam-полигон (для _poly_for/_bbox_for)
+    lay["_tiles"] = {}                                                 # tilename -> seam-полигон (для _poly_pool/рулона)
     _split = cfg.get("print_split", True)
     # порог реза = ПОЛЕЗНАЯ ширина холста: вычитаем припуск (2·seam на деталь) + зазор нестинга
     # (rgap=2·seam+20, буфер gap/2 с каждой стороны), иначе панель чуть у́же 1440 не влезает в рулон
