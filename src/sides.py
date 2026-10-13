@@ -903,35 +903,40 @@ def _round_strip_top(poly, dome_frac=0.5, seam_frac=0.35):
     Возвращает (new_poly, dart_pts): dart — вогнутая пунктир-вытачка внутри купола."""
     pts = [tuple(p) for p in poly]
     if len(pts) < 4:
-        return pts, None
+        return pts, None, 0.0
     top_y = min(p[1] for p in pts)
     top = [i for i, p in enumerate(pts) if abs(p[1] - top_y) < 1e-6]   # индексы верхнего ребра
     if len(top) < 2:
-        return pts, None
+        return pts, None, 0.0
     i0, i1 = top[0], top[-1]
     P0 = np.array(pts[i0], float); P1 = np.array(pts[i1], float)
     if P0[0] > P1[0]:
         P0, P1 = P1, P0; i0, i1 = i1, i0
     d = float(np.hypot(*(P1 - P0)))
     if d < 2:
-        return pts, None
-    h = dome_frac * d
-    N = max(12, int(d / 3))
+        return pts, None, 0.0
+    cx = (P0[0] + P1[0]) / 2.0
+    h = dome_frac * d                                                 # стрелка купола (0.5 -> полукруг)
+    R = ((d / 2.0) ** 2 + h * h) / (2.0 * h)                          # радиус дуги ОКРУЖНОСТИ (не синус!)
+    N = max(16, int(math.pi * R / 3))
     dome = []
-    for t in np.linspace(0, 1, N):
-        base = P0 + (P1 - P0) * t
-        dome.append((base[0], base[1] - h * math.sin(math.pi * t)))   # купол ВВЕРХ (меньше y)
-    # новый контур: купол(P0..P1) + нижние точки (всё, что не верхнее ребро), по порядку
+    for t in np.linspace(0, 1, N):                                   # дуга окружности P0..P1, выпуклая ВВЕРХ
+        s = -d / 2.0 + d * t
+        y = top_y + (R - h) - math.sqrt(max(R * R - s * s, 0.0))
+        dome.append((cx + s, y))
+    arc_len = R * 2.0 * math.asin(min(1.0, (d / 2.0) / R))            # длина дуги купола (для подгонки соседа)
     lower = [pts[k] for k in range(len(pts)) if k not in (i0, i1)]
-    # нижние точки — по убыванию... берём как есть (трапеция: низ-право, низ-лево)
     new_poly = dome + lower
     dart = None
     if seam_frac > 0:
+        hd = seam_frac * d
+        Rd = ((d / 2.0) ** 2 + hd * hd) / (2.0 * hd)
         dart = []
-        for t in np.linspace(0, 1, N):
-            base = P0 + (P1 - P0) * t
-            dart.append((base[0], base[1] + seam_frac * d * math.sin(math.pi * t)))  # вогнутая внутрь (больше y)
-    return new_poly, dart
+        for t in np.linspace(0, 1, N):                              # вогнутая дуга-вытачка ВНИЗ (внутрь)
+            s = -d / 2.0 + d * t
+            yd = top_y - (Rd - hd) + math.sqrt(max(Rd * Rd - s * s, 0.0))
+            dart.append((cx + s, yd))
+    return new_poly, dart, arc_len
 
 
 def round_gusset_shoulder(layout, cfg):
@@ -946,8 +951,9 @@ def round_gusset_shoulder(layout, cfg):
     darts = []
     for s in layout.get("strips", []):
         if s.get("i") in pieces:
-            new_poly, dart = _round_strip_top(s["poly"], frac, sfrac)
+            new_poly, dart, arc_len = _round_strip_top(s["poly"], frac, sfrac)
             s["poly"] = new_poly
+            s["dome_arc_len"] = arc_len                               # длина дуги купола (для подгонки соседа)
             if dart:
                 darts.append(dart)
     if darts:
