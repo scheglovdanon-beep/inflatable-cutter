@@ -752,12 +752,13 @@ def main():
                 body.append(_circle(h["cx"], h["cy"], h["r"], "#000000", lw))
                 if h.get("seam_r"):
                     body.append(_circle(h["cx"], h["cy"], h["seam_r"], "#000000", lw))
-        # ЗАКРУГЛЕНИЕ ПЛЕЧА: цветная линия купола по зонам сшива — В ТЕЛЕ боковины (едет с деталью в рулон)
+        # ЗАКРУГЛЕНИЕ ПЛЕЧА: цветная линия купола по зонам сшива — В ТЕЛЕ боковины (едет с деталью в рулон).
+        # Смещаем НАРУЖУ в кольцо припуска (как ключ у всех деталей) -> не заходит за контур реза.
         for seg in lay.get("shoulder_arc_segments", []):
             if seg.get("i") != s["i"]:
                 continue
             r, gg, bb = seg["rgb"]
-            dd = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in seg["pts"])
+            dd = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(seg["pts"], cen, off))
             body.append(f'<path d="{dd}" fill="none" stroke="#{r:02x}{gg:02x}{bb:02x}" '
                         f'stroke-width="{sw_seam}" stroke-linecap="round"/>')
         pieces.append((f"bokovina_{s['i']}", body))
