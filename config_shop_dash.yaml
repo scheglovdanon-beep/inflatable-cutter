@@ -1,0 +1,93 @@
+arm_cut: armpit
+arm_from_contour: false
+arm_hole_diameter_mm: 250
+arm_hole_top_margin_mm: 20
+arm_max_frac: 0.5
+arm_min_aspect: 1.4
+arm_raster_z: 3.0
+arm_side: auto
+arm_template: true
+arm_white_snap: 235
+arm_zone_color_raster: true
+armpit_center_frac: 0.05
+armpit_close_px: 9
+armpit_min_arm_frac: 0.015
+armpit_min_depth_frac: 0.03
+armpit_pair_local_frac: 0.9
+armpit_refine_aspect_relax: 0.7
+armpit_tip_free_frac: 0.2
+armpit_up_slack_frac: 0.0
+arms_identical: false
+arrange_sides: false
+assembly_instruction: true
+back_from_front: false
+base_diameter_mm: 460
+bg_page_frac: 0.95
+bg_soft_frac: 0.8
+blade_min_frac: 0.08
+bottom_detect_frac: 0.03
+contour_exclude_outline: false
+contour_gap_close_mm: 10.0
+corner_angle_deg: 35
+corner_simplify_mm: 4.0
+edge_taper_single: true
+elbow_max_frac: 0.72
+expected_arms: 1
+fan_diameter_mm: 460
+figure_side: left
+front_all_details: true
+front_smooth_mm: 70
+instruction_font_mm: 6
+instruction_width_mm: 300
+leg_height_mm: 150
+line_width_mm: 0.2
+main_width_mm: 350
+make_appendages: false
+make_back: true
+make_base: true
+make_hand: false
+make_spare_arm: true
+manual_arms:
+- elbow:
+  - - 157.77947102890604
+    - 207.27410761044888
+  - - 165.55209176637013
+    - 254.20837352586886
+  f:
+  - 220.8617672689615
+  - 246.0405355498238
+  hole_dy: 38.95440198850129
+  tip:
+  - 32.86176726896149
+  - 163.0405355498238
+  wrist:
+  - - 94.70166427487044
+    - 174.98811577054215
+  - - 77.36274109129668
+    - 199.2026096504722
+max_arms: 2
+mirror_back: false
+neck_min_drop: 0.12
+neck_search_top_frac: 0.5
+neck_smooth_mm: 40
+notch_interval_mm: 200
+print_arrange: true
+protrusion_min_area_mm2: 150
+protrusion_min_piece_mm: 500
+protrusion_narrow: true
+protrusion_open_r_mm: 60
+protrusion_reach_ratio: 0.6
+raster_zoom: 1.5
+repack: false
+roll_pack: false
+roll_print: true
+roll_width_mm: 1440
+seam_allowance_mm: 10
+side_max_len_mm: 1500
+side_min_len_mm: 200
+smooth_tol_mm: 1.0
+target_height_mm: 2700
+thickness_mm: 300
+tip_width_mm: 250
+transition_piece_len_mm: 500
+union_batch_size: 300

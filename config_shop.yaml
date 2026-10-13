@@ -34,6 +34,10 @@ bottom_detect_frac: 0.03
 figure_side: left
 smooth_tol_mm: 1.0
 arm_cut: armpit
+manual_arms:                           # ручной рез руки (девочка): хорда корня + кисть
+  - f: [230, 271]
+    tip: [33, 163]
+    blade: [[234, 174], [224, 248]]
 make_appendages: false
 make_hand: false
 make_spare_arm: true

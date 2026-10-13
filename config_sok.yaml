@@ -82,3 +82,4 @@ union_batch_size: 300
 raster_zoom: 1.5
 arm_raster_z: 3.0
 # ручной рез: 2 руки Secret Garden — левая (хорда 5-3), правая (хорда 4-2)
+contour_clip_outline: true

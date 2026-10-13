@@ -103,6 +103,17 @@ def build_contour(drawings, gap_mm: float, target_height_mm: float, exclude_outl
     s = (target_height_mm * MM2PT) / (y1 - y0)    # масштаб pt->pt к финалу
     g = gap_mm * MM2PT / s                         # зазор в исходных pt, чтобы в финале = gap_mm
     c = u.buffer(g).buffer(-g)
+    if (cfg or {}).get("contour_clip_outline"):   # цветные заливки нарисованы с запасом ЗА чёрной
+        thr = (cfg or {}).get("contour_outline_black_frac", 0.18)   # обводкой (keyline сверху визуально режет).
+        blk = [p for p in (_poly_of(d) for d in drawings            # Обрезаем контур по силуэту near-чёрной
+                           if d.get("fill") is not None and sum(d["fill"]) / 3.0 < thr) if p]  # обводки -> по чёрной линии.
+        if blk:
+            ks = unary_union([b.buffer(0) for b in blk])
+            ks_parts = list(ks.geoms) if isinstance(ks, MultiPolygon) else [ks]
+            ksf = max((Polygon(p.exterior) for p in ks_parts), key=lambda p: p.area)  # силуэт обводки без дыр
+            c2 = c.intersection(ksf.buffer(0))
+            if not c2.is_empty:
+                c = max(c2.geoms, key=lambda x: x.area) if isinstance(c2, MultiPolygon) else c2
     n_parts = 1 if isinstance(c, Polygon) else len(c.geoms)
     if isinstance(c, MultiPolygon):
         c = max(c.geoms, key=lambda x: x.area)
