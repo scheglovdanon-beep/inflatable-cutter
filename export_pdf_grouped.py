@@ -707,6 +707,22 @@ def main():
                     body.append(_circle(h["cx"], h["cy"], h["seam_r"], "#dc0000", lw))
         pieces.append((f"bokovina_{s['i']}", body))
 
+    # ЗАКРУГЛЕНИЕ ПЛЕЧА: пунктир-вытачка + метки заход|d/1.7|заход на куполе боковины
+    sh_body = []
+    for dart in lay.get("shoulder_darts", []):
+        dp = list(dart)
+        for i in range(0, len(dp) - 1, 2):                            # пунктир через сегмент
+            (x0, y0), (x1, y1) = dp[i], dp[i + 1]
+            sh_body.append(f'<path d="M {x0:.2f},{y0:.2f} L {x1:.2f},{y1:.2f}" fill="none" stroke="#808080" stroke-width="{lw}"/>')
+    for mk in lay.get("shoulder_apex_marks", []):
+        for (mx, my) in mk:
+            r = 6.0
+            sh_body.append(f'<path d="M {mx-r:.2f},{my-r:.2f} L {mx+r:.2f},{my+r:.2f} '
+                           f'M {mx-r:.2f},{my+r:.2f} L {mx+r:.2f},{my-r:.2f}" '
+                           f'fill="none" stroke="#ff00ff" stroke-width="{max(lw, 1.5):.2f}"/>')
+    if sh_body:
+        pieces.append(("plecho_razmetka", sh_body))
+
     # КИСТЬ и РУКА — каждая деталь своей группой (текстура по bbox src этого куска)
     for hp in lay.get("hand_pieces", []):
         dds = _dds_for_src(hp["src"]) if hp.get("src") is not None else arm_dds
