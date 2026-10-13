@@ -893,3 +893,62 @@ def render_debug(contour_mm, g, out_png, target_h=1500, margin=60):
         dr.text((px + 6, py - 6), f'#{s["i"]} L{s["len"]:.0f} T{s["thickness"]:.0f}', fill=(0, 0, 0))
     im.save(out_png)
     return W, H
+
+
+# ============ ЗАКРУГЛЕНИЕ ГАССЕТА У ПЛЕЧА (ТЗ_shoulder_round_2d) ============
+
+def _round_strip_top(poly, dome_frac=0.5, seam_frac=0.35):
+    """Заменить ПРЯМОЕ верхнее ребро полоски-гассета на выпуклую дугу-КУПОЛ (вверх, −y).
+    poly — список точек трапеции [верх-лево, верх-право, низ-право, низ-лево] (или больше).
+    Возвращает (new_poly, dart_pts): dart — вогнутая пунктир-вытачка внутри купола."""
+    pts = [tuple(p) for p in poly]
+    if len(pts) < 4:
+        return pts, None
+    top_y = min(p[1] for p in pts)
+    top = [i for i, p in enumerate(pts) if abs(p[1] - top_y) < 1e-6]   # индексы верхнего ребра
+    if len(top) < 2:
+        return pts, None
+    i0, i1 = top[0], top[-1]
+    P0 = np.array(pts[i0], float); P1 = np.array(pts[i1], float)
+    if P0[0] > P1[0]:
+        P0, P1 = P1, P0; i0, i1 = i1, i0
+    d = float(np.hypot(*(P1 - P0)))
+    if d < 2:
+        return pts, None
+    h = dome_frac * d
+    N = max(12, int(d / 3))
+    dome = []
+    for t in np.linspace(0, 1, N):
+        base = P0 + (P1 - P0) * t
+        dome.append((base[0], base[1] - h * math.sin(math.pi * t)))   # купол ВВЕРХ (меньше y)
+    # новый контур: купол(P0..P1) + нижние точки (всё, что не верхнее ребро), по порядку
+    lower = [pts[k] for k in range(len(pts)) if k not in (i0, i1)]
+    # нижние точки — по убыванию... берём как есть (трапеция: низ-право, низ-лево)
+    new_poly = dome + lower
+    dart = None
+    if seam_frac > 0:
+        dart = []
+        for t in np.linspace(0, 1, N):
+            base = P0 + (P1 - P0) * t
+            dart.append((base[0], base[1] + seam_frac * d * math.sin(math.pi * t)))  # вогнутая внутрь (больше y)
+    return new_poly, dart
+
+
+def round_gusset_shoulder(layout, cfg):
+    """Закруглить верх полосок-гассета, к которым примыкает плечо (где отверстие руки) — купол."""
+    if not cfg.get("shoulder_round"):
+        return
+    frac = float(cfg.get("shoulder_dome_frac", 0.5))
+    sfrac = float(cfg.get("shoulder_seam_frac", 0.35))
+    pieces = {h["piece"] for h in layout.get("arm_holes", [])}        # полоски с отверстием руки
+    if not pieces:
+        return
+    darts = []
+    for s in layout.get("strips", []):
+        if s.get("i") in pieces:
+            new_poly, dart = _round_strip_top(s["poly"], frac, sfrac)
+            s["poly"] = new_poly
+            if dart:
+                darts.append(dart)
+    if darts:
+        layout["shoulder_darts"] = layout.get("shoulder_darts", []) + darts
