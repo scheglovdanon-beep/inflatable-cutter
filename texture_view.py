@@ -176,6 +176,11 @@ def main():
         dpx = [T(x, y) for x, y in dart]
         for i in range(0, len(dpx) - 1, 2):                         # пунктир: через сегмент
             dr.line([dpx[i], dpx[i + 1]], fill=(120, 120, 120), width=lw)
+    for mk in lay.get("shoulder_apex_marks", []):                   # метки заход|d/1.7|заход на куполе
+        for (mx, my) in mk:
+            px, py = T(mx, my)
+            dr.line([(px - 9, py - 9), (px + 9, py + 9)], fill=(255, 0, 255), width=max(2, lw))
+            dr.line([(px - 9, py + 9), (px + 9, py - 9)], fill=(255, 0, 255), width=max(2, lw))
 
     # ----- РУКА (база/плечо/предплечье) — цвет зоны, либо ПОЛОСЫ текстуры вдоль руки + подпись -----
     for ap in lay.get("arm_pieces", []):

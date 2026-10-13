@@ -206,6 +206,9 @@ def build_layout(page, cfg):
         from pack import repack_layout
         repack_layout(lay, gap=2 * seam_mm + 40)
     add_seams(lay, seam_mm, arm_hole_seam=not cfg.get("arm_hole_no_seam"))
+    if cfg.get("shoulder_round"):                                # вытачка + метки из ФИНАЛЬНЫХ (переехавших) полосок
+        from sides import shoulder_overlays
+        shoulder_overlays(lay, cfg)
     return lay, fig, contour_mm, g, arm_pts, seam_mm
 
 

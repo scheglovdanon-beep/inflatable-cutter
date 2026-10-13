@@ -897,72 +897,60 @@ def render_debug(contour_mm, g, out_png, target_h=1500, margin=60):
 
 # ============ ЗАКРУГЛЕНИЕ ГАССЕТА У ПЛЕЧА (ТЗ_shoulder_round_2d) ============
 
-def _round_strip_top(poly, dome_frac=0.5, seam_frac=0.35):
+def _round_strip_top(poly, dome_frac=0.5):
     """Заменить ПРЯМОЕ верхнее ребро полоски-гассета на выпуклую дугу-КУПОЛ (вверх, −y).
-    poly — список точек трапеции [верх-лево, верх-право, низ-право, низ-лево] (или больше).
-    Возвращает (new_poly, dart_pts): dart — вогнутая пунктир-вытачка внутри купола."""
+    poly — трапеция [верх-лево, верх-право, низ-право, низ-лево] (или больше).
+    Возвращает (new_poly, n_dome, arc_len, chord_d): дуга = new_poly[:n_dome]."""
     pts = [tuple(p) for p in poly]
     if len(pts) < 4:
-        return pts, None, 0.0, 0.0
+        return pts, 0, 0.0, 0.0
     top_y = min(p[1] for p in pts)
-    top = [i for i, p in enumerate(pts) if abs(p[1] - top_y) < 1e-6]   # индексы верхнего ребра
+    top = [i for i, p in enumerate(pts) if abs(p[1] - top_y) < 1e-6]
     if len(top) < 2:
-        return pts, None, 0.0, 0.0
+        return pts, 0, 0.0, 0.0
     i0, i1 = top[0], top[-1]
     P0 = np.array(pts[i0], float); P1 = np.array(pts[i1], float)
     if P0[0] > P1[0]:
         P0, P1 = P1, P0; i0, i1 = i1, i0
     d = float(np.hypot(*(P1 - P0)))
     if d < 2:
-        return pts, None, 0.0, 0.0
+        return pts, 0, 0.0, 0.0
     cx = (P0[0] + P1[0]) / 2.0
-    h = dome_frac * d                                                 # стрелка купола (0.5 -> полукруг)
-    R = ((d / 2.0) ** 2 + h * h) / (2.0 * h)                          # радиус дуги ОКРУЖНОСТИ (не синус!)
+    h = dome_frac * d
+    R = ((d / 2.0) ** 2 + h * h) / (2.0 * h)                          # дуга ОКРУЖНОСТИ (не синус)
     N = max(16, int(math.pi * R / 3))
     dome = []
-    for t in np.linspace(0, 1, N):                                   # дуга окружности P0..P1, выпуклая ВВЕРХ
+    for t in np.linspace(0, 1, N):
         s = -d / 2.0 + d * t
         y = top_y + (R - h) - math.sqrt(max(R * R - s * s, 0.0))
         dome.append((cx + s, y))
-    arc_len = R * 2.0 * math.asin(min(1.0, (d / 2.0) / R))            # длина дуги купола
+    arc_len = R * 2.0 * math.asin(min(1.0, (d / 2.0) / R))
     lower = [pts[k] for k in range(len(pts)) if k not in (i0, i1)]
-    new_poly = dome + lower
-    dart = None
-    if seam_frac > 0:
-        hd = seam_frac * d
-        Rd = ((d / 2.0) ** 2 + hd * hd) / (2.0 * hd)
-        dart = []
-        for t in np.linspace(0, 1, N):                              # вогнутая дуга-вытачка ВНИЗ (внутрь)
-            s = -d / 2.0 + d * t
-            yd = top_y - (Rd - hd) + math.sqrt(max(Rd * Rd - s * s, 0.0))
-            dart.append((cx + s, yd))
-    return new_poly, dart, arc_len, d
+    return dome + lower, len(dome), arc_len, d
 
 
 def round_gusset_shoulder(layout, cfg):
-    """Закруглить верх полосок-гассета, к которым примыкает плечо (где отверстие руки) — купол."""
+    """Купол верха боковин с отверстием руки + подгонка соседней боковины (её ребро = d/ratio).
+    Метки/вытачку НЕ считаем здесь (полоска ещё переедет при раскладке) — см. shoulder_overlays."""
     if not cfg.get("shoulder_round"):
         return
     frac = float(cfg.get("shoulder_dome_frac", 0.5))
-    sfrac = float(cfg.get("shoulder_seam_frac", 0.35))
-    pieces = {h["piece"] for h in layout.get("arm_holes", [])}        # полоски с отверстием руки
+    pieces = {h["piece"] for h in layout.get("arm_holes", [])}
     if not pieces:
         return
-    ratio = float(cfg.get("shoulder_next_ratio", 1.7))               # сосед УЖЕ в ratio раз, чем купол
+    ratio = float(cfg.get("shoulder_next_ratio", 1.7))
     strips = layout.get("strips", [])
-    darts = []
     for s in strips:
         if s.get("i") not in pieces:
             continue
-        new_poly, dart, arc_len, chord_d = _round_strip_top(s["poly"], frac, sfrac)
+        new_poly, n_dome, arc_len, chord_d = _round_strip_top(s["poly"], frac)
+        if n_dome < 2:
+            continue
         s["poly"] = new_poly
-        s["dome_arc_len"] = arc_len; s["dome_chord"] = chord_d
-        if dart:
-            darts.append(dart)
-        # часть 2: СОСЕДНЯЯ боковина (к шее) — её мерящее ребро = ширина купола / ratio (1.7× уже)
-        if chord_d > 0 and "arc0" in s and "yn0" in s:
+        s["dome_n"] = n_dome; s["dome_chord"] = chord_d; s["dome_arc_len"] = arc_len; s["dome_frac"] = frac
+        if "arc0" in s and "yn0" in s:                               # соседняя боковина — ребро = d/ratio
             flip = s["yn0"] < s["yn1"]
-            top_arc = s["arc1"] if flip else s["arc0"]               # домленный (верхний) конец полоски
+            top_arc = s["arc1"] if flip else s["arc0"]
             adj = adj_key = None
             for t in strips:
                 if t is s or "arc0" not in t:
@@ -974,8 +962,54 @@ def round_gusset_shoulder(layout, cfg):
                     break
             if adj is not None:
                 _fit_edge_to_len(adj, adj_key, chord_d / ratio)
+
+
+def shoulder_overlays(layout, cfg):
+    """ПОСЛЕ раскладки: из ФИНАЛЬНОЙ домленной полоски посчитать вытачку (пунктир) и 2 метки
+    (заход|d/apex_ratio|заход). Купол = poly[:dome_n]."""
+    if not cfg.get("shoulder_round"):
+        return
+    sfrac = float(cfg.get("shoulder_seam_frac", 0.35))
+    apex_ratio = float(cfg.get("shoulder_apex_ratio", 1.7))
+    darts = []; marks = []
+    for s in layout.get("strips", []):
+        nd = s.get("dome_n", 0)
+        if nd < 2:
+            continue
+        arc = [tuple(p) for p in s["poly"][:nd]]
+        P0 = np.array(arc[0], float); P1 = np.array(arc[-1], float)
+        d = float(np.hypot(*(P1 - P0)))
+        if d < 2:
+            continue
+        cx = (P0[0] + P1[0]) / 2.0
+        base_y = (P0[1] + P1[1]) / 2.0                              # уровень хорды (концы дуги)
+        apex = min(arc, key=lambda p: p[1]); apex_y = apex[1]
+        updir = -1.0 if apex_y < base_y else 1.0                    # куда выпуклость (в раскладке y вниз)
+        h = abs(base_y - apex_y)
+        R = ((d / 2.0) ** 2 + h * h) / (2.0 * h) if h > 1e-6 else d
+        cy_c = apex_y - updir * R                                    # центр окружности
+        # 2 метки: середина дуги длины d/apex_ratio (вершина по центру) -> x-смещение от вершины
+        mid_len = d / apex_ratio
+        dth = min((mid_len / 2.0) / R, math.pi / 2 - 1e-3)
+        mk = []
+        for sgn in (-1.0, 1.0):
+            sx = sgn * R * math.sin(dth)                            # x-смещение от вершины по дуге
+            yy = apex_y + updir * (R - math.sqrt(max(R * R - sx * sx, 0.0)))
+            mk.append((cx + sx, yy))
+        marks.append(mk)
+        if sfrac > 0:                                              # вогнутая вытачка внутрь (к хорде и дальше)
+            hd = sfrac * d
+            Rd = ((d / 2.0) ** 2 + hd * hd) / (2.0 * hd)
+            dart = []
+            for t in np.linspace(0, 1, nd):
+                sx = -d / 2.0 + d * t
+                yy = base_y - updir * (Rd - hd) + updir * math.sqrt(max(Rd * Rd - sx * sx, 0.0))
+                dart.append((cx + sx, yy))
+            darts.append(dart)
     if darts:
-        layout["shoulder_darts"] = layout.get("shoulder_darts", []) + darts
+        layout["shoulder_darts"] = darts
+    if marks:
+        layout["shoulder_apex_marks"] = marks
 
 
 def _fit_edge_to_len(strip, at_arc_key, target_len):
