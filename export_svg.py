@@ -172,7 +172,8 @@ def build_layout(page, cfg):
         scale = fig.s * PT2MM
         for cd in cut_dets:
             dpoly = _aff.scale(cd["poly_pt"], scale, scale, origin=(0, 0))   # деталь в мм
-            d = build_detail(dpoly, cd["attach_len_pt"] * scale)
+            wmm = cd["width_pt"] * scale if cd.get("width_pt") else None
+            d = build_detail(dpoly, cd["attach_len_pt"] * scale, width_mm=wmm)
             col = _detail_main_color(page, cd["poly_pt"])        # доминирующий насыщенный цвет детали (не обводка)
             place_detail(lay, d, list(cd["poly_pt"].exterior.coords)[:-1], col)
             place_armpit_hole(lay, g, contour_mm, cd["f"], fig, cfg, dy_mm=cd.get("hole_dy", 0.0),

@@ -1,6 +1,7 @@
 "use strict";
 // Состояние мастера. Все точки храним в PT страницы PDF (как в manual_arms).
 const S = { sid:null, meta:null, size:"2700", n:1, ident:false, clip:true,
+            hasDetails:false, detailDone:false, detail:{pts:[]},
             arms:[],            // [{f,tip,blade,wrist,elbow}] в PT
             armCrops:[],        // метаданные кропов рук из /api/arm_preview
             cur:0 };
@@ -105,6 +106,7 @@ async function enterStep3(btn){                 // детект кандидат
 }
 $("#toS3").onclick = () => {
   S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked; S.clip=true;  // контур всегда по чёрной обводке (без белого фона)
+  S.hasDetails=$("#hasDetails").checked; S.detailDone=false; S.detail={pts:[]};
   S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
   S.cands=null;
   if(S.n===0){ goStep5(); return; }
@@ -200,7 +202,38 @@ function s4done(){ msg("#s4msg","","");
     goStep5(); return;
   }
   if(S.cur < S.n-1){ S.cur++; startHand(); } else goStep5(); }
-function goStep5(){ show(5); loadFrontPreview(); loadArmLayout(); }
+function goStep5(){
+  if(S.hasDetails && !S.detailDone){ startDetail(); return; }    // сперва вшивные детали
+  show(5); loadFrontPreview(); loadArmLayout();
+}
+function detailsPayload(){                                        // -> [{blade:[2pt], width?:[2pt]}]
+  if(!S.hasDetails) return undefined;
+  const p=S.detail.pts||[];
+  if(p.length<2) return undefined;
+  const d={blade:[p[0],p[1]]};
+  if(p.length>=4) d.width=[p[2],p[3]];
+  return [d];
+}
+// ---------- ШАГ Детали: вшивные детали (свободные клики) ----------
+const pickD = new Picker($("#cvD"));
+function startDetail(){
+  show("D");
+  pickD.load(S.meta.img, S.meta, ovD, onPickD);
+  updPromptD();
+}
+function onPickD(pt){ const p=S.detail.pts; if(p.length>=4) return; p.push(pt); pickD.draw(); updPromptD(); }
+function ovD(pk){ const p=S.detail.pts;
+  if(p.length>=2) pk.line(p[0],p[1],"#e4002b");               // линия реза (красным)
+  if(p.length>=4) pk.line(p[2],p[3],"#1560ff");              // ширина (синим)
+  p.forEach((q,i)=> pk.dot(q, i<2?"#e4002b":"#1560ff", String(i+1)));
+}
+function updPromptD(){ const n=S.detail.pts.length;
+  const t=["Клик 1: начало линии реза","Клик 2: конец линии реза","Клик 3: начало ширины","Клик 4: конец ширины","Готово — «подтвердить деталь»"][Math.min(n,4)];
+  $("#promptD").textContent=t; }
+$("#undoD").onclick=()=>{ S.detail.pts.pop(); pickD.draw(); updPromptD(); };
+$("#dNext").onclick=()=>{ if(S.detail.pts.length<2){ msg("#sDmsg","нужны хотя бы 2 точки линии реза","err"); return; }
+  S.detailDone=true; msg("#sDmsg","",""); goStep5(); };
+$("#skipD").onclick=()=>{ S.hasDetails=false; S.detailDone=true; msg("#sDmsg","",""); goStep5(); };
 async function loadArmLayout(){               // #3: полная раскладка руки(рук) справа от ползунка
   const wrap=$("#armLayWrap"), box=$("#armLayImgs");
   if(S.n===0){ if(wrap) wrap.style.display="none"; return; }
@@ -209,7 +242,7 @@ async function loadArmLayout(){               // #3: полная расклад
   try{
     const r=await fetch("/api/arm_layout",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,arms_identical:S.ident,
-        spare:$("#spare").checked,back_copy:$("#backCopy").checked,arms:S.arms.map(armPayload)})});
+        spare:$("#spare").checked,back_copy:$("#backCopy").checked,details:detailsPayload(),arms:S.arms.map(armPayload)})});
     const j=await r.json();
     if(!(j.images&&j.images.length)){ msg("#armLayMsg",j.error||"раскладка руки недоступна","err"); return; }
     msg("#armLayMsg", j.images.length>1?"2 разные руки":"раскладка руки","ok");
@@ -227,7 +260,7 @@ async function loadFrontPreview(){
   try{
     const r=await fetch("/api/front_preview",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,arms_identical:S.ident,
-        spare:$("#spare").checked,back_copy:$("#backCopy").checked,arms:S.arms.map(armPayload)})});
+        spare:$("#spare").checked,back_copy:$("#backCopy").checked,details:detailsPayload(),arms:S.arms.map(armPayload)})});
     const j=await r.json();
     if(!r.ok){ msg("#frontPrevMsg",j.error||"не удалось","err"); return; }
     msg("#frontPrevMsg",`цветом — где ляжет рука (${j.arms} шт., длина = Ø${j.hole_mm} мм отверстия)`,"ok");
@@ -310,7 +343,7 @@ $("#btnBuild").onclick=async()=>{
   busy($("#btnBuild"),true,"добавляю");
   try{
     const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,name:figName(),
-      clip_outline:S.clip, spare:$("#spare").checked, back_copy:$("#backCopy").checked, arms:S.arms.map(armPayload)};
+      clip_outline:S.clip, spare:$("#spare").checked, back_copy:$("#backCopy").checked, details:detailsPayload(), arms:S.arms.map(armPayload)};
     const r=await fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); return; }
     msg("#buildMsg","✓ добавлено в очередь — прогресс в блоке «Очередь сборки» ниже. Можно настроить ещё фигуру.","ok");

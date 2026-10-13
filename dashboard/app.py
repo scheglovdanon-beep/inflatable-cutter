@@ -106,7 +106,30 @@ def _apply_clip_outline(cfg, clip_outline):
     return cfg
 
 
-def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, clip_outline=None):
+def _apply_details(cfg, details):
+    """Вшивные детали (ложка и пр.) из UI -> manual_details. details=[{blade:[[x,y],[x,y]],
+    width?:[[x,y],[x,y]], hole_dy?}] в PT (свободные клики). f = середина линии реза."""
+    if not details:
+        return cfg
+    md = []
+    for d in details:
+        bl = d.get("blade")
+        if not (bl and len(bl) == 2):
+            continue
+        f = [(bl[0][0] + bl[1][0]) / 2.0, (bl[0][1] + bl[1][1]) / 2.0]   # f = середина реза
+        m = {"f": f, "blade": [[float(bl[0][0]), float(bl[0][1])], [float(bl[1][0]), float(bl[1][1])]]}
+        w = d.get("width")
+        if w and len(w) == 2:
+            m["width"] = [[float(w[0][0]), float(w[0][1])], [float(w[1][0]), float(w[1][1])]]
+        if d.get("hole_dy"):
+            m["hole_dy"] = float(d["hole_dy"])
+        md.append(m)
+    if md:
+        cfg["manual_details"] = md
+    return cfg
+
+
+def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, clip_outline=None, details=None):
     """Собрать cfg из выбора пользователя. arms = [{f:[x,y], tip:[x,y], blade?:[[..],[..]],
     wrist?:[[..],[..]], elbow?:[[..],[..]]}] в PT. spare — запасная рука (None=как в базе);
     back_copy — зад=копия переда (симметричная фигура; убирает лишние детали руки у 2-рукой);
@@ -123,7 +146,7 @@ def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, c
         cfg.pop("manual_arms", None)
         if spare is not None:
             cfg["make_spare_arm"] = bool(spare)
-        return cfg
+        return _apply_details(cfg, details)
     # НЕ трогаем make_appendages/make_hand (в базовом cosmo-конфиге они false — рука/кисть строятся
     # из ВЫРЕЗАННОГО куска через arm_template+build_arm_from_poly, а не старым get_arm_contour).
     cfg["arm_cut"] = "armpit"
@@ -149,7 +172,7 @@ def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, c
             m["hole_dy"] = float(a["hole_dy"])                        # ручной сдвиг отверстия руки (мм)
         man.append(m)
     cfg["manual_arms"] = man
-    return cfg
+    return _apply_details(cfg, details)
 
 
 def _save_library(sid, pdf_path, page_png, name):
@@ -509,7 +532,8 @@ def front_preview():
         _co = data.get("clip_outline")
         arms = _fill_tips(d, size, arms, clip_outline=_co)
         cfg = _build_cfg(size, len(arms), data.get("arms_identical", False), arms,
-                         spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co)
+                         spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co,
+                         details=data.get("details"))
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
         fig = get_front_figure(page, cfg)                            # ЛЁГКИЙ путь: только контур переда (без боковин/днища/руки)
         fig.contour_pt, cut = cut_waving_arms(page, fig.contour_pt, cfg, strict=False)
@@ -572,7 +596,7 @@ def arm_layout():
         _co = data.get("clip_outline")
         arms = _fill_tips(d, size, arms, clip_outline=_co)
         cfg = _build_cfg(size, len(arms), ident, arms, spare=data.get("spare"),
-                         back_copy=data.get("back_copy"), clip_outline=_co)
+                         back_copy=data.get("back_copy"), clip_outline=_co, details=data.get("details"))
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
         _cwd = os.getcwd()
         try:
@@ -740,7 +764,8 @@ def build():
     if n > 0:
         arms = _fill_tips(d, size, arms, clip_outline=_co)
     cfg = _build_cfg(size, n, data.get("arms_identical", False), arms,
-                     spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co)
+                     spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co,
+                     details=data.get("details"))
     jid = uuid.uuid4().hex[:10]
     job = {"id": jid, "sid": sid, "cfg": cfg, "want_svg": bool(data.get("svg", True)),
            "name": (data.get("name") or "макет"), "size": size, "n_arms": n,

@@ -79,3 +79,4 @@ contour_clip_outline: true
 manual_details:
   - f: [366, 186]
     blade: [[348, 169], [384, 204]]
+    width: [[352, 150], [372, 175]]

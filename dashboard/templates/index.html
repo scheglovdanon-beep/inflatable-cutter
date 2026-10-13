@@ -15,6 +15,7 @@
     <span class="step" data-s="2">2. Параметры</span>
     <span class="step" data-s="3">3. Рез руки</span>
     <span class="step" data-s="4">4. Кисть/предплечье</span>
+    <span class="step" data-s="D">Детали</span>
     <span class="step" data-s="5">5. Раскладка</span>
   </div>
 </header>
@@ -64,7 +65,8 @@
         </label>
         <div style="margin-top:6px">
           <label><input type="checkbox" id="spare" checked> запасная рука (копия на случай порыва)</label><br>
-          <label><input type="checkbox" id="backCopy"> зад = копия переда (симметричная фигура)</label>
+          <label><input type="checkbox" id="backCopy"> зад = копия переда (симметричная фигура)</label><br>
+          <label><input type="checkbox" id="hasDetails"> есть вшивающие детали (ложка и т.п.)</label>
         </div>
         <p class="hint">Для фигур с 2 разными руками, где перёд и зад одинаковы (напр. Охотники),
           включите «зад = копия переда» и выключите запаску — детали лягут ровными колонками.</p>
@@ -113,6 +115,26 @@
     <div class="nav"><button class="back" data-to="3">← назад</button></div>
   </section>
 
+  <!-- ШАГ Детали: вшивные детали (ложка и т.п.) — свободные клики -->
+  <section id="sD" class="panel">
+    <h2>Вшивные детали <span id="dLabel"></span></h2>
+    <div class="row">
+      <div class="controls">
+        <p>Кликните на макете по порядку:<br>
+          <b>1–2) линия реза</b> детали (красным) — где отрезать от тела;<br>
+          <b>3–4) ширина</b> детали (синим) — отрезок, по которому считается толщина/гассет.</p>
+        <p class="prompt" id="promptD"></p>
+        <button id="undoD">← убрать точку</button>
+        <button id="dNext">подтвердить деталь →</button>
+        <button id="skipD" class="back">пропустить (без деталей)</button>
+        <p class="hint">Пока поддерживается одна вшивная деталь. Рез и ширина — свободными кликами (как кисть/предплечье).</p>
+        <div id="sDmsg" class="msg"></div>
+      </div>
+      <div class="canvaswrap"><canvas id="cvD"></canvas></div>
+    </div>
+    <div class="nav"><button class="back" data-to="2">← назад</button></div>
+  </section>
+
   <!-- ШАГ 5: сборка -->
   <section id="s5" class="panel">
     <h2>Раскладка</h2>
@@ -155,6 +177,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=2026i"></script>
+<script src="/static/app.js?v=2026j"></script>
 </body>
 </html>

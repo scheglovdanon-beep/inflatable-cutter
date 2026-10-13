@@ -1772,20 +1772,22 @@ def cut_details(page, contour_pt, cfg, strict=True):
             continue
         body_pt = body2
         attach_len = float(np.hypot(*(c_pt - a_pt))) if (a_pt is not None and c_pt is not None) else 0.0
+        wseg = m.get("width")                                         # ширина = длина ОТРЕЗКА из 2 точек (PT)
+        width_pt = float(np.hypot(wseg[1][0] - wseg[0][0], wseg[1][1] - wseg[0][1])) if (wseg and len(wseg) == 2) else None
         out.append({"poly_pt": det, "f": list(f), "tip": list(tip),
                     "attach_pt": a_pt.tolist() if a_pt is not None else list(f),
-                    "attach_len_pt": attach_len, "hole_dy": m.get("hole_dy", 0.0)})
+                    "attach_len_pt": attach_len, "width_pt": width_pt, "hole_dy": m.get("hole_dy", 0.0)})
     return body_pt, out
 
 
-def build_detail(det_poly_mm, attach_len_mm, gap_mm=40.0):
+def build_detail(det_poly_mm, attach_len_mm, gap_mm=40.0, width_mm=None):
     """Лекало вшивной детали: перёд + зеркальный зад + гассет-полоска.
-    Ширина гассета W = ШИРИНА ДЕТАЛИ (меньшая сторона bbox) — деталь надувается толстой.
+    Ширина гассета W = width_mm (длина ОТРЕЗКА-ширины от пользователя) или меньшая сторона bbox.
     Длина гассета H = свободный периметр (периметр − линия реза).
     opening (вшивается в отверстие тела) = 2·рез + 2·W (сумма коротких рёбер)."""
     front = affinity.translate(det_poly_mm, -det_poly_mm.bounds[0], -det_poly_mm.bounds[1])
     mnx, mny, mxx, mxy = front.bounds; fw, fh = mxx - mnx, mxy - mny
-    W = max(min(fw, fh), 1.0)                                           # ширина детали = меньшая сторона
+    W = max(float(width_mm) if width_mm else min(fw, fh), 1.0)          # ширина детали = отрезок или меньшая сторона
     H = max(front.exterior.length - attach_len_mm, 1.0)                 # свободный периметр
     back = affinity.scale(front, xfact=-1.0, origin=(fw / 2.0, fh / 2.0))
     gusset = box(0, 0, W, H)
