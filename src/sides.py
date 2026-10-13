@@ -962,54 +962,64 @@ def round_gusset_shoulder(layout, cfg):
                     break
             if adj is not None:
                 _fit_edge_to_len(adj, adj_key, chord_d / ratio)
+                s["dome_adj_i"] = adj.get("i")                       # соседняя боковина (её цвет -> средняя зона купола)
+
+
+def _split_polyline_by_len(pts, a, b):
+    """Вернуть кусок полилинии pts между долями длины a..b (0..1) от полной длины."""
+    segd = [float(np.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]))
+            for i in range(len(pts) - 1)]
+    total = sum(segd) or 1.0
+    la, lb = a * total, b * total
+    out = []; acc = 0.0
+    for i in range(len(pts) - 1):
+        p0, p1 = pts[i], pts[i + 1]; dl = segd[i]
+        s0, s1 = acc, acc + dl
+        if s1 >= la and s0 <= lb and dl > 1e-9:
+            t0 = max(0.0, (la - s0) / dl); t1 = min(1.0, (lb - s0) / dl)
+            q0 = (p0[0] + (p1[0] - p0[0]) * t0, p0[1] + (p1[1] - p0[1]) * t0)
+            q1 = (p0[0] + (p1[0] - p0[0]) * t1, p0[1] + (p1[1] - p0[1]) * t1)
+            if not out:
+                out.append(q0)
+            out.append(q1)
+        acc = s1
+    return out
 
 
 def shoulder_overlays(layout, cfg):
-    """ПОСЛЕ раскладки: из ФИНАЛЬНОЙ домленной полоски посчитать вытачку (пунктир) и 2 метки
-    (заход|d/apex_ratio|заход). Купол = poly[:dome_n]."""
+    """ПОСЛЕ раскладки: раскрасить ЛИНИЮ купола боковины по зонам сшива (из ФИНАЛЬНОЙ полоски).
+    3 зоны вдоль дуги: заход(перёд) | середина d/apex_ratio (соседняя боковина) | заход(зад).
+    Цвет повторяет линию: заход = цвет этой боковины, середина = цвет соседней боковины.
+    Купол = poly[:dome_n]. Пишет layout['shoulder_arc_segments'] = [{pts, rgb, role}]."""
     if not cfg.get("shoulder_round"):
         return
-    sfrac = float(cfg.get("shoulder_seam_frac", 0.35))
     apex_ratio = float(cfg.get("shoulder_apex_ratio", 1.7))
-    darts = []; marks = []
+    segs = []
     for s in layout.get("strips", []):
         nd = s.get("dome_n", 0)
         if nd < 2:
             continue
         arc = [tuple(p) for p in s["poly"][:nd]]
-        P0 = np.array(arc[0], float); P1 = np.array(arc[-1], float)
-        d = float(np.hypot(*(P1 - P0)))
-        if d < 2:
-            continue
-        cx = (P0[0] + P1[0]) / 2.0
-        base_y = (P0[1] + P1[1]) / 2.0                              # уровень хорды (концы дуги)
-        apex = min(arc, key=lambda p: p[1]); apex_y = apex[1]
-        updir = -1.0 if apex_y < base_y else 1.0                    # куда выпуклость (в раскладке y вниз)
-        h = abs(base_y - apex_y)
-        R = ((d / 2.0) ** 2 + h * h) / (2.0 * h) if h > 1e-6 else d
-        cy_c = apex_y - updir * R                                    # центр окружности
-        # 2 метки: середина дуги длины d/apex_ratio (вершина по центру) -> x-смещение от вершины
-        mid_len = d / apex_ratio
-        dth = min((mid_len / 2.0) / R, math.pi / 2 - 1e-3)
-        mk = []
-        for sgn in (-1.0, 1.0):
-            sx = sgn * R * math.sin(dth)                            # x-смещение от вершины по дуге
-            yy = apex_y + updir * (R - math.sqrt(max(R * R - sx * sx, 0.0)))
-            mk.append((cx + sx, yy))
-        marks.append(mk)
-        if sfrac > 0:                                              # вогнутая вытачка внутрь (к хорде и дальше)
-            hd = sfrac * d
-            Rd = ((d / 2.0) ** 2 + hd * hd) / (2.0 * hd)
-            dart = []
-            for t in np.linspace(0, 1, nd):
-                sx = -d / 2.0 + d * t
-                yy = base_y - updir * (Rd - hd) + updir * math.sqrt(max(Rd * Rd - sx * sx, 0.0))
-                dart.append((cx + sx, yy))
-            darts.append(dart)
-    if darts:
-        layout["shoulder_darts"] = darts
-    if marks:
-        layout["shoulder_apex_marks"] = marks
+        arc_len = sum(float(np.hypot(arc[i + 1][0] - arc[i][0], arc[i + 1][1] - arc[i][1]))
+                      for i in range(len(arc) - 1)) or 1.0
+        d = s.get("dome_chord") or float(np.hypot(arc[-1][0] - arc[0][0], arc[-1][1] - arc[0][1]))
+        mid_len = min(d / apex_ratio, arc_len)                      # середина = d/1.7 вдоль дуги
+        fa = max(0.0, (arc_len - mid_len) / 2.0 / arc_len)          # граница захода (доля длины)
+        fb = 1.0 - fa
+        col_self = _palette(s["i"])                                 # цвет ЭТОЙ боковины (заходы)
+        adj_i = s.get("dome_adj_i")
+        col_adj = _palette(adj_i) if adj_i is not None else _palette(s["i"] + 7)
+        left = _split_polyline_by_len(arc, 0.0, fa)
+        mid = _split_polyline_by_len(arc, fa, fb)
+        right = _split_polyline_by_len(arc, fb, 1.0)
+        if len(left) >= 2:
+            segs.append({"pts": left, "rgb": col_self, "role": "zahod_front"})
+        if len(mid) >= 2:
+            segs.append({"pts": mid, "rgb": col_adj, "role": "mid_adj"})
+        if len(right) >= 2:
+            segs.append({"pts": right, "rgb": col_self, "role": "zahod_back"})
+    if segs:
+        layout["shoulder_arc_segments"] = segs
 
 
 def _fit_edge_to_len(strip, at_arc_key, target_len):

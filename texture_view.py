@@ -137,16 +137,21 @@ def main():
         dr.line([T(x, y) for x, y in s["poly"]] + [T(*s["poly"][0])], fill=_palette(s["i"]), width=max(3, lw * 3))
         label(s["poly"], f"bok#{s['i']}")
 
-    # ----- КЛЮЧ СБОРКИ: дуга каждого сегмента на ПЕРЕДЕ тем же цветом, что боковина -----
-    gl = g["gusset_line"]
-    for s in g["segments"]:
-        a0, a1 = s["arc0"], s["arc1"]
-        npts = max(2, int(abs(a1 - a0) / 4))
-        arc = [pt2cv(*(np.asarray(gl.interpolate(a0 + (a1 - a0) * k / npts).coords[0]) / f_mm))
-               for k in range(npts + 1)]                              # мм gusset -> pt (pt2cv ждёт pt)
-        dr.line(arc, fill=_palette(s["i"]), width=max(3, lw * 3))      # сопрягаемое ребро переда
+    # ЗАКРУГЛЕНИЕ ПЛЕЧА: раскраска ЛИНИИ купола по зонам сшива (заход|соседняя боковина|заход)
+    for seg in lay.get("shoulder_arc_segments", []):
+        dr.line([T(x, y) for x, y in seg["pts"]], fill=tuple(seg["rgb"]), width=max(4, lw * 4))
+
+    # ----- КЛЮЧ СБОРКИ: цветная дуга сегмента на ПЕРЕДЕ и ЗЕРКАЛЬНО на ЗАДЕ (тот же цвет = боковина) -----
+    for a in lay.get("front_seg_arcs", []):
+        arc = [T(x, y) for x, y in a["pts"]]                          # pts уже в мм панели переда
+        dr.line(arc, fill=tuple(a["rgb"]), width=max(3, lw * 3))
         mx, my = arc[len(arc) // 2]
-        dr.text((mx + 3, my - 6), f"{s['i']}", fill=_palette(s["i"]))
+        dr.text((mx + 3, my - 6), f"{a['i']}", fill=tuple(a["rgb"]))
+    for a in lay.get("back_seg_arcs", []):                            # зеркальный ключ на заде
+        arc = [T(x, y) for x, y in a["pts"]]
+        dr.line(arc, fill=tuple(a["rgb"]), width=max(3, lw * 3))
+        mx, my = arc[len(arc) // 2]
+        dr.text((mx + 3, my - 6), f"{a['i']}", fill=tuple(a["rgb"]))
 
     # ----- ДНИЩЕ + ножка — ЧЁРНЫЕ (цвет с 2D) + отверстие руки -----
     b = lay.get("base")
@@ -172,15 +177,6 @@ def main():
     for dh in lay.get("detail_holes", []):                          # отверстия вшивных деталей
         dr.ellipse([T(dh["cx"] - dh["r"], dh["cy"] - dh["r"]), T(dh["cx"] + dh["r"], dh["cy"] + dh["r"])],
                    outline=(30, 40, 70), width=lw)
-    for dart in lay.get("shoulder_darts", []):                      # пунктир-вытачка плеча (купол у шеи)
-        dpx = [T(x, y) for x, y in dart]
-        for i in range(0, len(dpx) - 1, 2):                         # пунктир: через сегмент
-            dr.line([dpx[i], dpx[i + 1]], fill=(120, 120, 120), width=lw)
-    for mk in lay.get("shoulder_apex_marks", []):                   # метки заход|d/1.7|заход на куполе
-        for (mx, my) in mk:
-            px, py = T(mx, my)
-            dr.line([(px - 9, py - 9), (px + 9, py + 9)], fill=(70, 40, 70), width=max(2, lw))
-            dr.line([(px - 9, py + 9), (px + 9, py - 9)], fill=(70, 40, 70), width=max(2, lw))
 
     # ----- РУКА (база/плечо/предплечье) — цвет зоны, либо ПОЛОСЫ текстуры вдоль руки + подпись -----
     for ap in lay.get("arm_pieces", []):
@@ -193,10 +189,10 @@ def main():
             for f0, f1, c in bands:                                  # f=0 у верхнего ребра детали
                 ld.rectangle([T(b[0], y0 + hpx * f0), T(b[2], y0 + hpx * f1)], fill=tuple(c))
             im.paste(layer, (0, 0), mask); del layer, mask         # освободить слои детали руки
-            dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(150, 0, 150), width=lw)
+            dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 0, 0), width=lw)
         else:
             dr.polygon([T(x, y) for x, y in poly.exterior.coords],
-                       fill=tuple(ap.get("fill", arm_col)), outline=(150, 0, 150))
+                       fill=tuple(ap.get("fill", arm_col)), outline=(0, 0, 0))
         label(poly, lbl(ap.get("name", "")))
 
     # ----- КИСТЬ: текстура жёстко привязана к контуру через аффин src(pt)->poly(раскладка) -----
@@ -227,7 +223,7 @@ def main():
         nonlocal im, dr
         if kind == "arm":                                           # база/плечо/предплечье — цвет зоны
             dr.polygon([T(x, y) for x, y in poly.exterior.coords],
-                       fill=tuple(fill) if fill else arm_col, outline=(150, 0, 150))
+                       fill=tuple(fill) if fill else arm_col, outline=(0, 0, 0))
             return
         mask = Image.new("L", im.size, 0)
         ImageDraw.Draw(mask).polygon([T(x, y) for x, y in poly.exterior.coords], fill=255)
@@ -251,7 +247,7 @@ def main():
                 im.paste(layer, (0, 0), mask)
         else:                                                       # боковина-полоска — цвет кисти
             im.paste(Image.new("RGB", im.size, hand_col), (0, 0), mask)
-        dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 150, 90), width=lw)
+        dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 0, 0), width=lw)
 
     for hpiece in lay.get("hand_pieces", []):
         render_piece(hpiece["poly"], "hand", hpiece.get("src"))
@@ -271,7 +267,7 @@ def main():
     # ----- ПРИПУСК НА ШОВ +Nмм: контур реза вокруг каждого лекала (сплошной, 0.2мм) -----
     from seam import add_seams, seam_rings
     seam_mm = cfg.get("seam_allowance_mm", 10)
-    add_seams(lay, seam_mm)
+    add_seams(lay, seam_mm, arm_hole_seam=not cfg.get("arm_hole_no_seam"))
     for ring in seam_rings(lay):
         dr.line([T(x, y) for x, y in ring], fill=(0, 0, 0), width=lw)
     b2 = lay.get("base")                                            # отверстия: припуск внутрь

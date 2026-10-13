@@ -319,11 +319,11 @@ def _piece_svg(page, p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill
             body += _hand_tex(page, poly, p["src"], cid)
         else:                                                        # полоска-боковина = цвет кисти
             body.append(_poly(list(poly.exterior.coords), fill=hand_fill, stroke="none", sw=0))
-        body.append(_poly(list(poly.exterior.coords), stroke="#009659", sw=lw))
+        body.append(_poly(list(poly.exterior.coords), stroke="#000000", sw=lw))
     else:                                                            # база/плечо/предплечье — цвет своей зоны
         pc = p.get("fill")
         fill = ("#%02x%02x%02x" % tuple(int(v) for v in pc)) if pc else arm_fill
-        body.append(_poly(list(poly.exterior.coords), fill=fill, stroke="#960096", sw=lw))
+        body.append(_poly(list(poly.exterior.coords), fill=fill, stroke="#000000", sw=lw))
     if p.get("seam"):
         body.append(_poly(list(p["seam"].exterior.coords), stroke="#000000", sw=lw))
     return body
@@ -707,19 +707,13 @@ def main():
                     body.append(_circle(h["cx"], h["cy"], h["seam_r"], "#000000", lw))
         pieces.append((f"bokovina_{s['i']}", body))
 
-    # ЗАКРУГЛЕНИЕ ПЛЕЧА: пунктир-вытачка + метки заход|d/1.7|заход на куполе боковины
+    # ЗАКРУГЛЕНИЕ ПЛЕЧА: цветная линия купола по зонам сшива (заход|соседняя боковина|заход)
     sh_body = []
-    for dart in lay.get("shoulder_darts", []):
-        dp = list(dart)
-        for i in range(0, len(dp) - 1, 2):                            # пунктир через сегмент
-            (x0, y0), (x1, y1) = dp[i], dp[i + 1]
-            sh_body.append(f'<path d="M {x0:.2f},{y0:.2f} L {x1:.2f},{y1:.2f}" fill="none" stroke="#808080" stroke-width="{lw}"/>')
-    for mk in lay.get("shoulder_apex_marks", []):
-        for (mx, my) in mk:
-            r = 6.0
-            sh_body.append(f'<path d="M {mx-r:.2f},{my-r:.2f} L {mx+r:.2f},{my+r:.2f} '
-                           f'M {mx-r:.2f},{my+r:.2f} L {mx+r:.2f},{my-r:.2f}" '
-                           f'fill="none" stroke="#46283c" stroke-width="{max(lw, 1.5):.2f}"/>')
+    for seg in lay.get("shoulder_arc_segments", []):
+        r, gg, bb = seg["rgb"]
+        hexc = f"#{r:02x}{gg:02x}{bb:02x}"
+        dd = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in seg["pts"])
+        sh_body.append(f'<path d="{dd}" fill="none" stroke="{hexc}" stroke-width="{sw_seam}" stroke-linecap="round"/>')
     if sh_body:
         pieces.append(("plecho_razmetka", sh_body))
 

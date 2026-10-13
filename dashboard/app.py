@@ -138,6 +138,7 @@ def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, c
     _apply_clip_outline(cfg, clip_outline)
     if shoulder_round is not None:                                    # закругление плеча (купол у шеи)
         cfg["shoulder_round"] = bool(shoulder_round)
+    cfg["arm_hole_no_seam"] = True                                    # у отверстия руки без припуск-обводки
     if back_copy is not None:
         cfg["back_from_front"] = bool(back_copy)
     if int(n_arms) <= 0:
@@ -702,10 +703,10 @@ def arm_layout():
                     layer = tex.transform((W, H), Image.AFFINE,
                                           (ax[0], ax[1], ax[2], ay[0], ay[1], ay[2]), resample=Image.BILINEAR)
                     im.paste(layer, (0, 0), _poly_mask(poly))
-                    dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 150, 90), width=2)
+                    dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 0, 0), width=2)
                 elif nm == "боковина":                                # боковина кисти — цвет кисти
                     _fill(poly, hcol)
-                    dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 150, 90), width=2)
+                    dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 0, 0), width=2)
                 else:                                                 # ЦЕПОЧКА: реальный цвет/полосы руки
                     fillc = tuple(p.get("fill") or arm_col)
                     bands = p.get("bands")
@@ -717,7 +718,7 @@ def arm_layout():
                         im.paste(layer, (0, 0), _poly_mask(poly))
                     else:
                         _fill(poly, fillc)
-                    dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(150, 0, 150), width=1)
+                    dr.line([T(x, y) for x, y in poly.exterior.coords], fill=(0, 0, 0), width=1)
                 c = poly.centroid; tx = lbl.get(nm, nm)
                 dr.text((T(c.x, c.y)[0] - len(tx) * 3, T(c.x, c.y)[1] - 7), tx, fill=(40, 40, 40), font=fnt)
             fnm = f"armlay{gi}.png"; im.save(os.path.join(d, fnm))

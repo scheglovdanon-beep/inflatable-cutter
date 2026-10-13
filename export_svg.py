@@ -82,6 +82,32 @@ def _poly(pts, fill="none", stroke="#000", sw=0.2, closed=True):
     return f'<{tag} points="{p}" fill="{fill}" stroke="{stroke}" stroke-width="{sw:.3f}"/>'
 
 
+def _assembly_key_arcs(lay, g, contour_mm, f_mm):
+    """Цветной КЛЮЧ СБОРКИ вдоль периметра: на переде по gusset_line, на заде — ЗЕРКАЛЬНО
+    (тот же цвет = та же боковина, швее видно какой сегмент к чему пришивать).
+    Пишет lay['front_seg_arcs'] и lay['back_seg_arcs'] = [{pts (мм панели), rgb, i}]."""
+    if not g or "gusset_line" not in g:
+        return
+    gl = g["gusset_line"]
+    ftf = _tex_tf(contour_mm, lay["front"], f_mm)
+    front = []
+    for s in g["segments"]:
+        a0, a1 = s["arc0"], s["arc1"]
+        n = max(2, int(abs(a1 - a0) / 6))
+        pts = [ftf(*(np.asarray(gl.interpolate(a0 + (a1 - a0) * k / n).coords[0]) / f_mm))
+               for k in range(n + 1)]
+        front.append({"pts": pts, "rgb": list(_palette(s["i"])), "i": s["i"]})
+    lay["front_seg_arcs"] = front
+    bk = lay.get("back")
+    if bk:                                                           # зеркало дуг переда в bbox зада
+        fb = lay["front"].bounds; bb = bk["poly"].bounds
+        fw = (fb[2] - fb[0]) or 1.0; fh = (fb[3] - fb[1]) or 1.0
+        bw = bb[2] - bb[0]; bh = bb[3] - bb[1]
+        mir = lambda p: (bb[0] + (1 - (p[0] - fb[0]) / fw) * bw, bb[1] + (p[1] - fb[1]) / fh * bh)
+        lay["back_seg_arcs"] = [{"pts": [mir(p) for p in a["pts"]], "rgb": a["rgb"], "i": a["i"]}
+                                for a in front]
+
+
 def build_layout(page, cfg):
     """Полная раскладка: перёд, боковины(цвет), кисть, рука, днище + припуски.
     Возвращает (lay, fig, contour_mm, g, arm_pts, seam_mm)."""
@@ -206,9 +232,10 @@ def build_layout(page, cfg):
         from pack import repack_layout
         repack_layout(lay, gap=2 * seam_mm + 40)
     add_seams(lay, seam_mm, arm_hole_seam=not cfg.get("arm_hole_no_seam"))
-    if cfg.get("shoulder_round"):                                # вытачка + метки из ФИНАЛЬНЫХ (переехавших) полосок
+    if cfg.get("shoulder_round"):                                # раскраска линии купола по зонам сшива
         from sides import shoulder_overlays
         shoulder_overlays(lay, cfg)
+    _assembly_key_arcs(lay, g, contour_mm, fig.s * PT2MM)        # цветной ключ сборки: перёд + зеркальный зад
     return lay, fig, contour_mm, g, arm_pts, seam_mm
 
 
@@ -245,6 +272,15 @@ def main():
         svg.append(_poly(list(s["poly"]), stroke=HEX(_palette(s["i"])), sw=lw))
     svg.append("</g>")
 
+    # КЛЮЧ СБОРКИ: цветная дуга сегмента на ПЕРЕДЕ и ЗЕРКАЛЬНО на ЗАДЕ (тот же цвет = боковина)
+    svg.append('<g id="assembly_key">')
+    for a in lay.get("front_seg_arcs", []) + lay.get("back_seg_arcs", []):
+        svg.append(_poly(a["pts"], stroke=HEX(tuple(a["rgb"])), sw=max(lw, 2.0), closed=False))
+    # линия купола плеча по зонам сшива (заход|соседняя боковина|заход)
+    for seg in lay.get("shoulder_arc_segments", []):
+        svg.append(_poly(seg["pts"], stroke=HEX(tuple(seg["rgb"])), sw=max(lw, 2.0), closed=False))
+    svg.append("</g>")
+
     # КИСТЬ/РУКА: текстура через аффин src(pt)->poly + контур. arm_dds — по bbox КАЖДОГО куска
     # с src (несколько рук C → у каждой свой участок макета).
     all_dds = [dd for dd in page.get_drawings()
@@ -273,7 +309,7 @@ def main():
                 svg.append("</g>")
         else:
             svg.append(_poly(list(poly.exterior.coords), fill=hand_hex, stroke="none", sw=0))
-        svg.append(_poly(list(poly.exterior.coords), stroke="#009659", sw=lw))
+        svg.append(_poly(list(poly.exterior.coords), stroke="#000000", sw=lw))
     svg.append("</g>")
 
     # РУКА (база/плечо/предплечье), ДНИЩЕ, ножка, отверстия — контуры
@@ -281,7 +317,7 @@ def main():
     for apc in lay.get("arm_pieces", []):
         pc = apc.get("fill")                                          # цвет зоны (предплечье/плечо)
         fill = HEX(tuple(int(v) for v in pc)) if pc else "none"
-        svg.append(_poly(list(apc["poly"].exterior.coords), fill=fill, stroke="#960096", sw=lw))
+        svg.append(_poly(list(apc["poly"].exterior.coords), fill=fill, stroke="#000000", sw=lw))
     svg.append("</g>")
     b = lay.get("base")
     if b:
@@ -289,24 +325,24 @@ def main():
         lx, ly, lwd, lh = b["leg"]
         svg.append(_poly([(lx, ly), (lx + lwd, ly), (lx + lwd, ly + lh), (lx, ly + lh)], stroke="#000", sw=lw))
         fx, fy = b["fan_c"]; r = b["fan_d"] / 2
-        svg.append(f'<circle cx="{fx:.3f}" cy="{fy:.3f}" r="{r:.3f}" fill="none" stroke="#dc0000" stroke-width="{lw}"/>')
+        svg.append(f'<circle cx="{fx:.3f}" cy="{fy:.3f}" r="{r:.3f}" fill="none" stroke="#000000" stroke-width="{lw}"/>')
         if b.get("fan_seam_r"):
-            svg.append(f'<circle cx="{fx:.3f}" cy="{fy:.3f}" r="{b["fan_seam_r"]:.3f}" fill="none" stroke="#dc0000" stroke-width="{lw}"/>')
+            svg.append(f'<circle cx="{fx:.3f}" cy="{fy:.3f}" r="{b["fan_seam_r"]:.3f}" fill="none" stroke="#000000" stroke-width="{lw}"/>')
     ah = lay.get("arm_hole")
     if ah:
-        svg.append(f'<circle cx="{ah["cx"]:.3f}" cy="{ah["cy"]:.3f}" r="{ah["r"]:.3f}" fill="none" stroke="#dc0000" stroke-width="{lw}"/>')
+        svg.append(f'<circle cx="{ah["cx"]:.3f}" cy="{ah["cy"]:.3f}" r="{ah["r"]:.3f}" fill="none" stroke="#000000" stroke-width="{lw}"/>')
         if ah.get("seam_r"):
-            svg.append(f'<circle cx="{ah["cx"]:.3f}" cy="{ah["cy"]:.3f}" r="{ah["seam_r"]:.3f}" fill="none" stroke="#dc0000" stroke-width="{lw}"/>')
+            svg.append(f'<circle cx="{ah["cx"]:.3f}" cy="{ah["cy"]:.3f}" r="{ah["seam_r"]:.3f}" fill="none" stroke="#000000" stroke-width="{lw}"/>')
     for ah in lay.get("arm_holes", []):                             # отверстия Ø250 (по одному на руку)
-        svg.append(f'<circle cx="{ah["cx"]:.3f}" cy="{ah["cy"]:.3f}" r="{ah["r"]:.3f}" fill="none" stroke="#dc0000" stroke-width="{lw}"/>')
+        svg.append(f'<circle cx="{ah["cx"]:.3f}" cy="{ah["cy"]:.3f}" r="{ah["r"]:.3f}" fill="none" stroke="#000000" stroke-width="{lw}"/>')
         if ah.get("seam_r"):
-            svg.append(f'<circle cx="{ah["cx"]:.3f}" cy="{ah["cy"]:.3f}" r="{ah["seam_r"]:.3f}" fill="none" stroke="#dc0000" stroke-width="{lw}"/>')
+            svg.append(f'<circle cx="{ah["cx"]:.3f}" cy="{ah["cy"]:.3f}" r="{ah["seam_r"]:.3f}" fill="none" stroke="#000000" stroke-width="{lw}"/>')
 
     # ПРИПУСК НА ШОВ +Nмм (сплошной)
     from seam import seam_rings
     svg.append('<g id="seam_allowance">')
     for ring in seam_rings(lay):
-        svg.append(_poly(ring, stroke="#dc0000", sw=lw))
+        svg.append(_poly(ring, stroke="#000000", sw=lw))
     svg.append("</g>")
 
     svg.append("</svg>")
