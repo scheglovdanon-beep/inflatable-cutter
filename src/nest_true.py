@@ -14,6 +14,7 @@ True-Shape Nesting (NFP) — укладка деталей по РЕАЛЬНОМ
 Адаптировано по идеям pyFit (github badass-data-science/pyFit-agentic-polygon-nesting):
 packer.py (bottom-left по кандидатам-вершинам NFP), nfp.py (Minkowski через pyclipper).
 """
+import math
 import pyclipper
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.geometry.polygon import orient
@@ -22,8 +23,12 @@ from shapely.prepared import prep
 from shapely import affinity
 
 SCALE = 10 ** 5                                                   # 0.01 мм точность для pyclipper (int)
-ROT = {0: (1.0, 0.0, 0.0, 1.0), 90: (0.0, -1.0, 1.0, 0.0),
-       180: (-1.0, 0.0, 0.0, -1.0), 270: (0.0, 1.0, -1.0, 0.0)}
+
+
+def _rot_abcd(ang):
+    """Коэффициенты поворота (a,b,d,e) вокруг (0,0) на угол ang° (CCW) для shapely-аффина."""
+    t = math.radians(ang); c = math.cos(t); s = math.sin(t)
+    return (c, -s, s, c)
 
 
 def _ext(poly):
@@ -71,7 +76,7 @@ def _place_order(infl, roll_h, rotations, grid_step):
     for sid, ip in infl:
         best = None                                               # (key, M, cand)
         for ang in rotations:
-            a, b, d, e = ROT[ang]
+            a, b, d, e = _rot_abcd(ang)
             rp = affinity.affine_transform(ip, (a, b, d, e, 0.0, 0.0))
             rpts = _ext(rp)
             rb = rp.bounds; w = rb[2] - rb[0]; h = rb[3] - rb[1]
@@ -108,7 +113,7 @@ def _place_order(infl, roll_h, rotations, grid_step):
             if local is not None and (best is None or local[0] < best[0]):
                 best = local
         if best is None:                                          # не влезло ни в один угол
-            a, b, d, e = ROT[0]; rb = ip.bounds
+            a, b, d, e = (1.0, 0.0, 0.0, 1.0); rb = ip.bounds
             M = (a, b, d, e, cur_w - rb[0], -rb[1])
             cand = affinity.affine_transform(ip, M); best = ((cur_w, 0.0), M, cand)
         _, M, cand = best
@@ -148,7 +153,7 @@ def nest_true_shape(shapes, roll_h, gap, rotations=(0, 90, 180, 270), orders=Non
         "maxside": lambda t: -max(bb(t[1])),
     }
     if orders is None:
-        orders = ["area", "height", "maxside"]                   # 3 порядка — баланс плотность/скорость
+        orders = ["area", "height", "maxside"]                   # 3 порядка × 8 углов -> берём самый плотный
     best_res, best_w = None, float("inf")
     for name in orders:
         infl = sorted(base, key=keys[name])
