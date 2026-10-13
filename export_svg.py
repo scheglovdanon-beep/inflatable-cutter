@@ -236,6 +236,12 @@ def build_layout(page, cfg):
         from sides import shoulder_overlays
         shoulder_overlays(lay, cfg)
     _assembly_key_arcs(lay, g, contour_mm, fig.s * PT2MM)        # цветной ключ сборки: перёд + зеркальный зад
+    if cut_arms and "front" in lay:                              # ЛИНИЯ РЕЗА ПЛЕЧА на переде (где пристыковывается рука)
+        ftf = _tex_tf(contour_mm, lay["front"], fig.s * PT2MM)
+        marks = [[ftf(*bl[0]), ftf(*bl[1])] for ca in cut_arms
+                 if (bl := ca.get("blade_pt"))]
+        if marks:
+            lay["arm_cut_marks"] = marks
     return lay, fig, contour_mm, g, arm_pts, seam_mm
 
 

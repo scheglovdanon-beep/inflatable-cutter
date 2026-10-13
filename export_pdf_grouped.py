@@ -548,6 +548,8 @@ def main():
         a0, a1 = s["arc0"], s["arc1"]; n = max(2, int(abs(a1 - a0) / 6))
         pts = [tf_f(*(np.asarray(gl.interpolate(a0 + (a1 - a0) * k / n).coords[0]) / f_mm)) for k in range(n + 1)]
         front_arcs.append((HEX(_palette(s["i"])), pts))
+    for seg in lay.get("arm_cut_marks", []):                          # ЛИНИЯ РЕЗА ПЛЕЧА (где пристыковывается рука)
+        front_arcs.append(("#cc5500", list(seg)))                     # dull-оранжевый = «рука здесь»
 
     def _arc_paths(arcs, panel, gid):
         pp = _prep2(panel); out = [f'<g id="{gid}">']

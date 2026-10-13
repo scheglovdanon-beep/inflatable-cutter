@@ -637,8 +637,10 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
                 continue
             body_pt = body2
             exc = body_pt.exterior                                    # контур изменился после реза
+            blade_pt = [tuple(shA), tuple(shB)] if shA is not None else None  # концы хорды реза (стык руки) в PT
             cut.append({"poly_pt": arm_poly, "f": f, "tip": tip,
                         "wrist": m.get("wrist"), "elbow": m.get("elbow"),  # ручные срезы запястья/локтя (опц.)
+                        "blade_pt": blade_pt,                              # линия реза плеча (для разметки на переде)
                         "hole_dy": m.get("hole_dy", 0.0)})                 # ручной сдвиг отверстия руки (мм)
         if darts:
             cfg["_shoulder_darts"] = cfg.get("_shoulder_darts", []) + darts   # PT -> перевести в мм в build_layout
@@ -666,7 +668,9 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
                 raise RuntimeError("рез от подмышки не разделил тело — проверь пороги")
             continue
         body_pt = body2
-        cut.append({"poly_pt": arm_poly, "f": a["f"], "tip": a["tip"]})
+        bl = a.get("blade")
+        cut.append({"poly_pt": arm_poly, "f": a["f"], "tip": a["tip"],
+                    "blade_pt": [tuple(bl[0]), tuple(bl[1])] if bl else None})
     return body_pt, cut
 
 
