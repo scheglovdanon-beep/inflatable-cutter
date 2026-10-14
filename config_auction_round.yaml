@@ -111,3 +111,4 @@ thickness_mm: 300
 tip_width_mm: 250
 transition_piece_len_mm: 500
 union_batch_size: 300
+arm_hole_from_cut: true   # Ø отверстия руки = длине реза; база/плечо под π·L

@@ -64,10 +64,13 @@ def measure_edges(poly, ang_thr=30, simp_mm=4.0):
     return (l1, l2) if y1 > y2 else (l2, l1)                  # (bottom, top) по среднему y
 
 
-def build_arm(cfg):
-    """3 детали руки из шаблона, в мм, масштаб s=D_hole/D_template. Классификация по форме."""
+def build_arm(cfg, hole_d=None):
+    """3 детали руки из шаблона, в мм, масштаб s=D_hole/D_template. Классификация по форме.
+    hole_d — диаметр отверстия (мм); None -> arm_hole_diameter_mm. При arm_hole_from_cut
+    приходит ДЛИНА РЕЗА -> база/плечо подгоняются под π·hole_d (окружность отверстия)."""
     tpl = cfg.get("arm_template_pdf", "examples/arm_template.pdf")
-    s = cfg.get("arm_hole_diameter_mm", 250) / cfg.get("arm_template_hole_mm", 250)
+    hd = float(hole_d) if hole_d else cfg.get("arm_hole_diameter_mm", 250)
+    s = hd / cfg.get("arm_template_hole_mm", 250)
     page = pymupdf.open(tpl)[0]
     pieces = []
     for d in page.get_drawings():
@@ -1226,7 +1229,7 @@ def _wrist_on_poly(page, arm_pt, tip, cfg, armpit=None):
     return best[2], tip, best[1]
 
 
-def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None, wrist=None, elbow=None):
+def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None, wrist=None, elbow=None, hole_d=None):
     """РУКА ПО ЭТАЛОННОМУ ШАБЛОНУ (examples/arm_template.pdf, фикс. форма для фигуры 2700,
     Ø250) + КИСТЬ, задетектированная из НАШЕГО вырезанного полигона руки (detect_armpits).
 
@@ -1258,8 +1261,9 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None, wrist=None, 
         wrist, tip_used, wmethod = _wrist_on_poly(page, arm_arr, tip, cfg, armpit=armpit)
     hand_pts, fore_pts = cut_arm(arm_arr, wrist, tip_used)
 
-    # 2) ЭТАЛОННАЯ рука (фикс. шаблон 2700, Ø250): база/плечо/предплечье
-    pieces = build_arm(cfg)
+    # 2) ЭТАЛОННАЯ рука: база/плечо/предплечье. hole_d (= длина реза при arm_hole_from_cut) ->
+    #    эталон масштабируется так, что база/нижнее ребро плеча = π·hole_d (окружность отверстия).
+    pieces = build_arm(cfg, hole_d=hole_d)
     pred = next(p for p in pieces if p.get("name") == "predplechie")
     plec = next(p for p in pieces if p.get("name") == "plecho")
     baza = next(p for p in pieces if p.get("name") == "baza")
@@ -1295,7 +1299,7 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None, wrist=None, 
         if sh_bands:
             plec["bands"] = sh_bands
 
-    hole_d = cfg.get("arm_hole_diameter_mm", 250)
+    hole_d = float(hole_d) if hole_d else cfg.get("arm_hole_diameter_mm", 250)
     hole_c = math.pi * hole_d
     diag = {
         "wrist_method": wmethod, "hole_d": hole_d,
