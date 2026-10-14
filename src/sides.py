@@ -963,6 +963,8 @@ def round_gusset_shoulder(layout, cfg):
             if adj is not None:
                 _fit_edge_to_len(adj, adj_key, chord_d / ratio)
                 s["dome_adj_i"] = adj.get("i")                       # соседняя боковина (её цвет -> средняя зона купола)
+                adj["gusset_mate_w"] = chord_d / ratio               # для 3D: глубина гассета у стыка = d/ratio (сужение к шее)
+                adj["gusset_mate_end"] = adj_key                     # на каком конце сегмента это ребро
 
 
 def _split_polyline_by_len(pts, a, b):
