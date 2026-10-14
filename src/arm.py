@@ -644,6 +644,7 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
             cut.append({"poly_pt": arm_poly, "f": f, "tip": tip,
                         "wrist": m.get("wrist"), "elbow": m.get("elbow"),  # ручные срезы запястья/локтя (опц.)
                         "blade_pt": blade_pt,                              # линия реза плеча (для разметки на переде)
+                        "one_point": not m.get("blade"),                   # рез по 1 точке (вертикальный) vs хорда из 2 точек
                         "hole_dy": m.get("hole_dy", 0.0)})                 # ручной сдвиг отверстия руки (мм)
         if darts:
             cfg["_shoulder_darts"] = cfg.get("_shoulder_darts", []) + darts   # PT -> перевести в мм в build_layout

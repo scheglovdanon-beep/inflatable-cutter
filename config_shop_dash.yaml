@@ -91,3 +91,4 @@ thickness_mm: 300
 tip_width_mm: 250
 transition_piece_len_mm: 500
 union_batch_size: 300
+arm_narrow_upper: true   # 1 рука + рез по 1 точке -> гассет выше линии реза у́же на 1.7x

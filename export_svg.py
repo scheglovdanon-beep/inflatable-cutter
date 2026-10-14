@@ -131,6 +131,18 @@ def build_layout(page, cfg):
 
     contour_mm = smooth_front(contour_to_mm(fig), cfg)
     g = build_gusset(contour_mm, cfg); classify_sides(g, contour_mm)
+    # 1 РУКА + РЕЗ ПО 1 ТОЧКЕ: горизонталь от верха реза -> весь гассет ВЫШЕ у́же на ratio (голова/шея)
+    if cfg.get("arm_narrow_upper") and len(cut_arms) == 1 and cut_arms[0].get("one_point") and cut_arms[0].get("blade_pt"):
+        _bl = cut_arms[0]["blade_pt"]; _fmm = fig.s * PT2MM
+        _cut_top_y = min(_bl[0][1], _bl[1][1]) * _fmm                 # верх реза (мин y) в мм
+        _ratio = cfg.get("arm_narrow_ratio", cfg.get("shoulder_next_ratio", 1.7))
+        _gl = g["gusset_line"]
+        for _s in g["segments"]:
+            _my = _gl.interpolate((_s["arc0"] + _s["arc1"]) / 2.0).coords[0][1]
+            if _my < _cut_top_y - 1:                                  # сегмент ВЫШЕ линии реза -> у́же
+                for _k in ("thickness", "t0", "t1"):
+                    if _k in _s:
+                        _s[_k] = _s[_k] / _ratio
     lay = build_fitting_layout(contour_mm, g, base=build_base(g, cfg))
     arm_pts = None
     if cfg.get("make_appendages", True):                         # рука/кисть/запаска (выкл для фигур без руки)

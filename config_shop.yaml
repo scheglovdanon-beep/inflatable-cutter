@@ -78,3 +78,4 @@ union_batch_size: 300
 raster_zoom: 1.5
 arm_raster_z: 3.0
 # ручной рез: правая машущая рука National Furniture — хорда (точки 2 и 5), кисть — точка 0
+arm_narrow_upper: true   # 1 рука + рез по 1 точке -> гассет выше линии реза у́же на 1.7x
