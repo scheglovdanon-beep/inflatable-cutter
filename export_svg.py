@@ -325,11 +325,14 @@ def build_layout(page, cfg):
         if marks:
             lay["arm_cut_marks"] = marks
     if cfg.get("seam_check"):                                    # БОТ-ЧЕКЕР сшивных рёбер (TZ_seam_checker.md)
-        from seam_check import check_seams, format_report
-        lay["seam_issues"] = check_seams(lay, fig, g, cfg)
-        _rep, _nf = format_report(lay["seam_issues"])
-        if _nf:
-            print(f"[seam_check] НЕСОВПАДЕНИЯ РЁБЕР: {_nf} FAIL\n{_rep}")
+        try:                                                     # чекер НЕ должен ронять сборку/превью
+            from seam_check import check_seams, format_report
+            lay["seam_issues"] = check_seams(lay, fig, g, cfg)
+            _rep, _nf = format_report(lay["seam_issues"])
+            if _nf:
+                print(f"[seam_check] НЕСОВПАДЕНИЯ РЁБЕР: {_nf} FAIL\n{_rep}")
+        except Exception as _e:
+            print("[seam_check] проверка не выполнена:", _e)
     return lay, fig, contour_mm, g, arm_pts, seam_mm
 
 

@@ -96,19 +96,24 @@ def check_seams(lay, fig, g, cfg):
                        "b": f"min={minh:.0f}", "b_len": float(minh), "delta": max(0.0, minh - D),
                        "delta_frac": 0.0, "ok": D >= minh - 1.0, "pts": None})
 
-    # ---------- Сужение: узкие боковины (после детали с рукой) = основной гассет / ratio ----------
+    # ---------- Сужение: узкая боковина = ОСНОВНАЯ боковина / ratio ----------
+    # (узкой считаем ту, у которой ширина×ratio совпадает с реальной бо́лее широкой боковиной —
+    #  это и есть основная, от которой её сузили; разных «основных» ширин может быть несколько: 350/460)
     if cfg.get("arm_narrow_upper") or cfg.get("arm_narrow_between"):
         ratio = cfg.get("arm_narrow_ratio", cfg.get("shoulder_next_ratio", 1.7))
-        ths = [max(s.get("t0", 0), s.get("t1", 0)) for s in strips if not s.get("dome_n")]
-        if ths:
-            std = max(ths); target = std / ratio
-            for s in strips:
-                if s.get("dome_n"):
-                    continue
-                t0, t1 = s.get("t0", 0), s.get("t1", 0)
-                if t0 < std - 2.0 and t1 < std - 2.0:                   # РАВНОМЕРНО узкая -> должна быть std/ratio
-                    w = max(t0, t1)
-                    add(f"боковина #{s['i']} сужение ×1/{ratio:g}", f"ширина={w:.0f}", w, f"std/{ratio:g}", target)
+        widths = sorted({round(max(s.get("t0", 0), s.get("t1", 0)), 1) for s in strips if not s.get("dome_n")})
+        maxw = max(widths) if widths else 0
+        for s in strips:
+            if s.get("dome_n"):
+                continue
+            t0, t1 = s.get("t0", 0), s.get("t1", 0)
+            if not (t0 < maxw - 2.0 and t1 < maxw - 2.0):               # не у́же максимума -> это основная, пропуск
+                continue
+            w = max(t0, t1)
+            std = next((ow for ow in sorted(widths, reverse=True)        # ищем основную: ow/ratio ≈ w
+                        if ow > w + 2 and abs(ow / ratio - w) <= max(2.0, w * 0.02)), None)
+            if std is not None:                                         # нашли -> это корректное сужение ×1/ratio
+                add(f"боковина #{s['i']} сужение ×1/{ratio:g}", f"ширина={w:.0f}", w, f"{std:.0f}/{ratio:g}", std / ratio)
 
     return issues
 
