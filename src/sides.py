@@ -306,7 +306,7 @@ def place_arm_hole_xy(layout, g, contour_mm, shoulder_xy, cfg):
                           "r": R, "piece": s["i"], "side": s.get("side", "left")}
 
 
-def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg, dy_mm=0.0, r_override=None, hole_list="arm_holes"):
+def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg, dy_mm=0.0, r_override=None, hole_list="arm_holes", one_point=True):
     """Ø arm_hole_diameter_mm на боковине, ближайшей к точке подмышки armpit_pt (в PT).
     Пишет в СПИСОК arm_holes (не перезатирает при нескольких руках). Боковина — по индексу
     сегмента гассета (seg['i']), как place_arm_hole. dy_mm — ручной сдвиг центра отверстия
@@ -328,7 +328,9 @@ def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg, dy_mm=0.0, r_o
     R = float(r_override) if r_override else cfg.get("arm_hole_diameter_mm", 250) / 2.0
     m = cfg.get("arm_hole_top_margin_mm", 20)
     stop, sbot = min(ys), max(ys); Ls = sbot - stop
-    if cfg.get("arm_hole_at_armpit"):                              # НИЗ отверстия = точка подмышки (круг вверх)
+    if cfg.get("arm_hole_top_at_seam"):                            # ВЕРХ отверстия = верхнее ребро боковины
+        cy = min(max(stop + R + dy_mm, stop + R), sbot - R)        # (= крайняя точка сшива с передом)
+    elif cfg.get("arm_hole_at_armpit"):                            # НИЗ отверстия = точка подмышки (круг вверх)
         flip = seg["yn0"] < seg["yn1"]                            # верх полоски -> к макушке фигуры
         a_top, a_bot = (seg["arc1"], seg["arc0"]) if flip else (seg["arc0"], seg["arc1"])
         y_arm = stop + (arc - a_top) / ((a_bot - a_top) or 1.0) * Ls   # подмышка на полоске
@@ -336,7 +338,7 @@ def place_armpit_hole(layout, g, contour_mm, armpit_pt, fig, cfg, dy_mm=0.0, r_o
     else:
         cy = min(max(stop + m + R + dy_mm, stop + m + R), sbot - m - R)   # у верха полоски + ручной сдвиг
     layout.setdefault(hole_list, []).append(
-        {"cx": (min(xs) + max(xs)) / 2.0, "cy": cy, "r": R, "piece": piece_i})
+        {"cx": (min(xs) + max(xs)) / 2.0, "cy": cy, "r": R, "piece": piece_i, "one_point": one_point})
 
 
 def contour_to_mm(fig):
@@ -897,9 +899,11 @@ def render_debug(contour_mm, g, out_png, target_h=1500, margin=60):
 
 # ============ ЗАКРУГЛЕНИЕ ГАССЕТА У ПЛЕЧА (ТЗ_shoulder_round_2d) ============
 
-def _round_strip_top(poly, dome_frac=0.5):
+def _round_strip_top(poly, dome_frac=0.5, preserve_len=False):
     """Заменить ПРЯМОЕ верхнее ребро полоски-гассета на выпуклую дугу-КУПОЛ (вверх, −y).
     poly — трапеция [верх-лево, верх-право, низ-право, низ-лево] (или больше).
+    preserve_len: купол ВХОДИТ в длину боковины (прямая часть короче на пол-дуги), чтобы
+    сторона боковины (прямая+дуга до вершины) = исходной длине сегмента, а не длиннее.
     Возвращает (new_poly, n_dome, arc_len, chord_d): дуга = new_poly[:n_dome]."""
     pts = [tuple(p) for p in poly]
     if len(pts) < 4:
@@ -929,13 +933,127 @@ def _round_strip_top(poly, dome_frac=0.5):
     return dome + lower, len(dome), arc_len, d
 
 
+def _clip_bands(bands, f0, f1):
+    """Полосы цвета (frac вдоль сегмента) -> подрезать к под-диапазону [f0,f1] и перенормировать."""
+    if not bands:
+        return bands
+    w = (f1 - f0) or 1.0; out = []
+    for bf0, bf1, c in bands:
+        n0 = (min(max(bf0, f0), f1) - f0) / w
+        n1 = (min(max(bf1, f0), f1) - f0) / w
+        if n1 - n0 > 1e-3:
+            out.append([n0, n1, c])
+    return out or None
+
+
+def narrow_between_arms(g, arc_a, arc_b, ratio=1.7, snap_mm=150.0):
+    """2 руки: гассет по дуге МЕЖДУ верхними точками реза рук (поверху, через голову) × 1/ratio.
+    Режем сегменты на arc_a/arc_b; боковина, касающаяся [lo,hi], целиком × 1/ratio (без тейпера).
+    Точки реза ПРИВЯЗЫВАЕМ к ближайшей границе сегмента (snap_mm), чтобы не плодить ломтики.
+    Модифицирует g['segments']."""
+    lo, hi = sorted([float(arc_a), float(arc_b)])
+    bounds = sorted(set([s["arc0"] for s in g["segments"]] + [s["arc1"] for s in g["segments"]]))
+    def _snap(a):                                                     # к ближайшей границе сегмента, если в пределах snap_mm
+        nb = min(bounds, key=lambda b: abs(b - a))
+        return nb if abs(nb - a) <= snap_mm else a
+    lo, hi = _snap(lo), _snap(hi)
+    cross = [lo, hi]
+    gl = g["gusset_line"]; yb = gl.bounds; ymin, ymax = yb[1], yb[3]
+    def _yn(arc):
+        return (ymax - gl.interpolate(arc).coords[0][1]) / ((ymax - ymin) or 1.0)
+    new = []
+    for s in g["segments"]:
+        a0, a1 = s["arc0"], s["arc1"]; span = (a1 - a0) or 1.0
+        cuts = sorted(a for a in cross if a0 + 10.0 < a < a1 - 10.0)
+        t0s, t1s = s.get("t0", s["thickness"]), s.get("t1", s["thickness"])
+        for b0, b1 in zip([a0] + cuts, cuts + [a1]):
+            f0 = (b0 - a0) / span; f1 = (b1 - a0) / span
+            nt0 = t0s + (t1s - t0s) * f0; nt1 = t0s + (t1s - t0s) * f1
+            yn0, yn1 = _yn(b0), _yn(b1)
+            ns = {**s, "arc0": b0, "arc1": b1, "len": b1 - b0,
+                  "t0": nt0, "t1": nt1, "thickness": max(nt0, nt1),
+                  "yn0": yn0, "yn1": yn1, "y_norm": (yn0 + yn1) / 2}
+            if cuts:
+                ns["bands"] = _clip_bands(s.get("bands"), f0, f1)
+            new.append(ns)
+    inv = 1.0 / ratio; eps = 1.0
+    for i, s in enumerate(new):
+        s["i"] = i
+        in0 = lo - eps <= s["arc0"] <= hi + eps                        # конец В верхнем отрезке?
+        in1 = lo - eps <= s["arc1"] <= hi + eps
+        if in0 and in1:                                              # ЦЕЛИКОМ в отрезке (голова) -> равномерно 1.7x
+            s["t0"] *= inv; s["t1"] *= inv
+        elif in0 or in1:                                             # ПОГРАНИЧНАЯ (деталь руки) -> ПЕРЕХОД: конец у
+            if in0:                                                 # отрезка = 1.7x, другой конец = стандарт
+                s["t0"] *= inv
+            if in1:
+                s["t1"] *= inv
+        s["thickness"] = max(s["t0"], s["t1"])
+    g["segments"] = new
+
+
+def narrow_upper_gusset(g, cut_top_y, ratio=1.7, blend_mm=400.0):
+    """1 рука + рез по 1 точке. Линия реза — горизонталь y=cut_top_y. Боковину, ПЕРЕСЕКАЮЩУЮ
+    линию, режем на 2 детали по линии. Выше линии ширина × 1/ratio; ниже узкая сторона (× 1/ratio
+    у линии) ПЛАВНО (длина blend_mm вниз) расширяется до стандарта. Модифицирует g['segments']."""
+    gl = g["gusset_line"]; L = gl.length
+    cross = []                                                        # arc-позиции пересечения горизонтали с гассетом
+    N = max(400, int(L / 2.0)); prev = None
+    for k in range(N + 1):
+        a = L * k / N; y = gl.interpolate(a).coords[0][1]
+        if prev is not None and (prev[1] - cut_top_y) * (y - cut_top_y) < 0:
+            t = (cut_top_y - prev[1]) / ((y - prev[1]) or 1e-9)
+            cross.append(prev[0] + (a - prev[0]) * t)
+        prev = (a, y)
+    cross = sorted(cross); ded = []                                  # дедуп близких пересечений (без 1-мм ломтиков)
+    for a in cross:
+        if not ded or a - ded[-1] > 10.0:
+            ded.append(a)
+    cross = ded
+    yb = gl.bounds; ymin, ymax = yb[1], yb[3]
+    def _yn(arc):
+        return (ymax - gl.interpolate(arc).coords[0][1]) / ((ymax - ymin) or 1.0)
+    new = []                                                          # разрез сегментов по cross
+    for s in g["segments"]:
+        a0, a1 = s["arc0"], s["arc1"]; span = (a1 - a0) or 1.0
+        cuts = sorted(a for a in cross if a0 + 10.0 < a < a1 - 10.0)  # не резать у границы -> без микро-ломтиков
+        t0s, t1s = s.get("t0", s["thickness"]), s.get("t1", s["thickness"])
+        for b0, b1 in zip([a0] + cuts, cuts + [a1]):
+            f0 = (b0 - a0) / span; f1 = (b1 - a0) / span
+            nt0 = t0s + (t1s - t0s) * f0; nt1 = t0s + (t1s - t0s) * f1
+            yn0, yn1 = _yn(b0), _yn(b1)
+            ns = {**s, "arc0": b0, "arc1": b1, "len": b1 - b0,
+                  "t0": nt0, "t1": nt1, "thickness": max(nt0, nt1),
+                  "yn0": yn0, "yn1": yn1, "y_norm": (yn0 + yn1) / 2}
+            if cuts:                                                  # резаный -> подрезать полосы цвета
+                ns["bands"] = _clip_bands(s.get("bands"), f0, f1)
+            new.append(ns)
+    inv = 1.0 / ratio; eps = 1.0                                      # переиндексация + ширина по положению к линии
+    for i, s in enumerate(new):
+        s["i"] = i
+        y0 = gl.interpolate(s["arc0"]).coords[0][1]
+        y1 = gl.interpolate(s["arc1"]).coords[0][1]
+        a0 = y0 <= cut_top_y + eps; a1 = y1 <= cut_top_y + eps        # конец на/выше линии реза?
+        if a0 and a1:                                                 # ДЕТАЛЬ ЦЕЛИКОМ ВЫШЕ -> равномерно 1.7x
+            s["t0"] *= inv; s["t1"] *= inv
+        elif a0 or a1:                                                # ПЕРВАЯ ниже линии -> тейпер: конец у линии 1.7x,
+            if a0:                                                    # другой конец = стандарт (плавный переход вниз)
+                s["t0"] *= inv
+            if a1:
+                s["t1"] *= inv
+        # иначе (целиком ниже) -> стандарт, без изменений
+        s["thickness"] = max(s["t0"], s["t1"])
+    g["segments"] = new
+
+
 def round_gusset_shoulder(layout, cfg):
     """Купол верха боковин с отверстием руки + подгонка соседней боковины (её ребро = d/ratio).
     Метки/вытачку НЕ считаем здесь (полоска ещё переедет при раскладке) — см. shoulder_overlays."""
     if not cfg.get("shoulder_round"):
         return
     frac = float(cfg.get("shoulder_dome_frac", 0.5))
-    pieces = {h["piece"] for h in layout.get("arm_holes", [])}
+    # КУПОЛ только при резе по 1 точке (подмышка/вертикаль). Рез 2 точками (хорда) -> стык НЕ закругляем.
+    pieces = {h["piece"] for h in layout.get("arm_holes", []) if h.get("one_point", True)}
     if not pieces:
         return
     ratio = float(cfg.get("shoulder_next_ratio", 1.7))
@@ -961,10 +1079,19 @@ def round_gusset_shoulder(layout, cfg):
                 if adj:
                     break
             if adj is not None:
-                _fit_edge_to_len(adj, adj_key, chord_d / ratio)
                 s["dome_adj_i"] = adj.get("i")                       # соседняя боковина (её цвет -> средняя зона купола)
-                adj["gusset_mate_w"] = chord_d / ratio               # для 3D: глубина гассета у стыка = d/ratio (сужение к шее)
-                adj["gusset_mate_end"] = adj_key                     # на каком конце сегмента это ребро
+                if cfg.get("arm_narrow_upper") or cfg.get("arm_narrow_between"):  # соседняя уже равномерно 1.7× —
+                    mate_w = adj["t0"] if adj_key == "arc0" else adj["t1"]  # НЕ сужаем её, а среднюю зону купола
+                    s["dome_mid_len"] = float(mate_w)                # подгоняем ПОД её ребро (сшив совпадает)
+                else:                                                # старый путь (космонавт): ребро соседней = d/ratio
+                    _fit_edge_to_len(adj, adj_key, chord_d / ratio)
+                    adj["gusset_mate_w"] = chord_d / ratio           # для 3D: глубина гассета у стыка = d/ratio
+                    adj["gusset_mate_end"] = adj_key                 # на каком конце сегмента это ребро
+        if cfg.get("dome_in_gusset_len"):                            # купол ВХОДИТ в длину боковины: опустить дугу на
+            _mid = s.get("dome_mid_len") or (chord_d / ratio)        # ЗАХОД=(дуга−середина)/2 -> сторона(прямая+заход)=сегмент
+            _zh = max(0.0, (arc_len - _mid) / 2.0)                    # (заход — часть купола, что сшивается с передом)
+            _pp = list(s["poly"])
+            s["poly"] = [(x, y + _zh) for (x, y) in _pp[:n_dome]] + _pp[n_dome:]
 
 
 def _split_polyline_by_len(pts, a, b):
@@ -1005,7 +1132,7 @@ def shoulder_overlays(layout, cfg):
         arc_len = sum(float(np.hypot(arc[i + 1][0] - arc[i][0], arc[i + 1][1] - arc[i][1]))
                       for i in range(len(arc) - 1)) or 1.0
         d = s.get("dome_chord") or float(np.hypot(arc[-1][0] - arc[0][0], arc[-1][1] - arc[0][1]))
-        mid_len = min(d / apex_ratio, arc_len)                      # середина = d/1.7 вдоль дуги
+        mid_len = min(s.get("dome_mid_len") or (d / apex_ratio), arc_len)  # середина = ребро соседней боковины (или d/1.7)
         fa = max(0.0, (arc_len - mid_len) / 2.0 / arc_len)          # граница захода (доля длины)
         fb = 1.0 - fa
         col_self = _palette(s["i"])                                 # цвет ЭТОЙ боковины (заходы)
@@ -1022,6 +1149,45 @@ def shoulder_overlays(layout, cfg):
             segs.append({"pts": right, "rgb": col_self, "role": "zahod_back", "i": s["i"]})
     if segs:
         layout["shoulder_arc_segments"] = segs
+
+
+def raise_hole_to_zahod_top(layout, cfg):
+    """ПОСЛЕ round_gusset_shoulder: поднять верх отверстия руки на уровень ВЕРХА захода с
+    передом — передняя часть вшивается, заходя на купол, и верх дыры = верх этого захода.
+    Заход = крайние зоны дуги купола (до доли fa / после fb, как в shoulder_overlays).
+    Верх захода = самая высокая (min y) граничная точка зон. Ставим cy = y_zahod_top + r."""
+    if not (cfg.get("shoulder_round") and cfg.get("arm_hole_top_at_seam")):
+        return
+    apex_ratio = float(cfg.get("shoulder_apex_ratio", 1.7))
+    strips = {s.get("i"): s for s in layout.get("strips", [])}
+    for h in layout.get("arm_holes", []):
+        s = strips.get(h["piece"])
+        if not s:
+            continue
+        nd = s.get("dome_n", 0)
+        if nd < 2:
+            continue
+        arc = [tuple(p) for p in s["poly"][:nd]]
+        arc_len = sum(float(np.hypot(arc[i + 1][0] - arc[i][0], arc[i + 1][1] - arc[i][1]))
+                      for i in range(len(arc) - 1)) or 1.0
+        d = s.get("dome_chord") or float(np.hypot(arc[-1][0] - arc[0][0], arc[-1][1] - arc[0][1]))
+        mid_len = min(s.get("dome_mid_len") or (d / apex_ratio), arc_len)
+        fa = max(0.0, (arc_len - mid_len) / 2.0 / arc_len)
+        fb = 1.0 - fa
+        pa = _split_polyline_by_len(arc, 0.0, fa)                   # заход-перёд (конец у доли fa)
+        pb = _split_polyline_by_len(arc, fb, 1.0)                   # заход-зад (начало у доли fb)
+        cands = []
+        if len(pa) >= 1:
+            cands.append(pa[-1][1])
+        if len(pb) >= 1:
+            cands.append(pb[0][1])
+        if not cands:
+            continue
+        y_zahod_top = min(cands)                                    # самый верх захода (min y)
+        r = h["r"]
+        ys = [p[1] for p in s["poly"]]
+        cy = min(max(y_zahod_top + r, min(ys) + r), max(ys) - r)    # не выезжать за боковину
+        h["cy"] = cy
 
 
 def _fit_edge_to_len(strip, at_arc_key, target_len):

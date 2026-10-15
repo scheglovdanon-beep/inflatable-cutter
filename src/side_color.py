@@ -14,9 +14,11 @@ def _hue(c):
     return colorsys.rgb_to_hsv(*[v / 255.0 for v in c])[0] * 360.0
 
 
-def _simplify_bands(bands, base, hue_merge_deg=25.0):
+def _simplify_bands(bands, base, hue_merge_deg=25.0, val_merge_max=None):
     """Упростить оттенки: соседние зоны одного акцента (близкий оттенок) слить и
-    покрасить ДОМИНИРУЮЩИМ цветом (которого больше по длине). Белый — своя группа."""
+    покрасить ДОМИНИРУЮЩИМ цветом (которого больше по длине). Белый — своя группа.
+    val_merge_max: если задан — НЕ сливать полосы с разницей яркости (max-канал) больше порога
+    (тёмная сумка не сольётся в светлую кожу при близком тоне)."""
     groups = []                                                      # [f0, f1, {color: length}]
     for f0, f1, c in bands:
         white = (tuple(c) == tuple(base))
@@ -30,6 +32,9 @@ def _simplify_bands(bands, base, hue_merge_deg=25.0):
             elif not white and not gwhite:
                 dh = abs(_hue(c) - _hue(dom)); dh = min(dh, 360 - dh)
                 same = dh <= hue_merge_deg
+                if same and val_merge_max is not None:               # разная яркость -> не сливать
+                    if abs(int(max(c)) - int(max(dom))) > val_merge_max:
+                        same = False
         if same:
             groups[-1][1] = f1
             groups[-1][2][tuple(c)] = groups[-1][2].get(tuple(c), 0.0) + (f1 - f0)
@@ -72,6 +77,34 @@ def _merge_small_bands(bands, min_frac):
                 cand[0] = min(cand[0], out[k][0]); cand[1] = max(cand[1], out[k][1])
                 out.pop(k); changed = True; break
     merged = []                                                       # 3) слить соседние одинаковые
+    for b in out:
+        if merged and tuple(merged[-1][2]) == tuple(b[2]):
+            merged[-1][1] = b[1]
+        else:
+            merged.append(list(b))
+    return [(g[0], g[1], tuple(g[2])) for g in merged]
+
+
+def _drop_dark_bands(bands, dark_val):
+    """C: тёмные полосы (max-канал < dark_val) поглотить в более крупного НЕ-тёмного соседа.
+    Если не-тёмных соседей нет — оставить (реально тёмная деталь)."""
+    if len(bands) <= 1:
+        return bands
+    out = [list(b) for b in bands]
+    dark = lambda b: max(b[2]) < dark_val
+    changed = True
+    while changed and len(out) > 1:
+        changed = False
+        for k in range(len(out)):
+            if dark(out[k]):
+                neigh = [n for n in (out[k - 1] if k > 0 else None,
+                                     out[k + 1] if k < len(out) - 1 else None)
+                         if n and not dark(n)]
+                if neigh:
+                    cand = max(neigh, key=lambda n: n[1] - n[0])
+                    cand[0] = min(cand[0], out[k][0]); cand[1] = max(cand[1], out[k][1])
+                    out.pop(k); changed = True; break
+    merged = []                                                      # слить соседние одинаковые
     for b in out:
         if merged and tuple(merged[-1][2]) == tuple(b[2]):
             merged[-1][1] = b[1]
@@ -301,9 +334,13 @@ def base_fill_color(page, front_drawings_fn, contour_pt=None):
     return tuple(int(v) for v in cols[int(np.argmax(cnts))])
 
 
-def _edges_top_down(poly, has_waist):
+def _edges_top_down(poly, has_waist, dome_n=0):
     """Левая и правая кромки полосы, обе сверху вниз."""
-    if has_waist:
+    if dome_n and dome_n >= 2 and len(poly) >= dome_n + 2:
+        # купол: poly = [дуга купола (dome_n)] + [низ-право, низ-лево]
+        left = [poly[0], poly[dome_n + 1]]            # верх-лево (старт дуги, у базы) -> низ-лево
+        right = [poly[dome_n - 1], poly[dome_n]]      # верх-право (конец дуги, у базы) -> низ-право
+    elif has_waist:
         half = len(poly) // 2
         left = poly[:half]
         right = poly[half:][::-1]
@@ -358,6 +395,39 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
         n = n / nn
         if not contour_mm.contains(Point(p + n * 2.0)):             # внутрь силуэта
             n = -n
+        if cfg.get("side_color_dominant"):                          # ДОМИНАНТ по ДЛИНЕ в поперечном рядке (луче внутрь)
+            d0 = cfg.get("side_color_ray_start_mm", 3.0)            # крупные приграничные заливки: сумка/джинса
+            d1 = cfg.get("side_color_depth_mm", 60.0)
+            ds = cfg.get("side_color_ray_step_mm", 2.0)
+            clu_thr = cfg.get("side_color_cluster_thr", 28)        # близость RGB (макс по каналу) для одного бакета
+            white_sum = cfg.get("side_color_white_skip_sum", 735)  # near-белое = фон/зазор -> пропуск
+            min_val = cfg.get("side_color_min_value", 0)           # A: яркостный порог — тёмное не считаем совсем
+            dark_w = cfg.get("side_color_dark_weight", 1.0)        # B: вес тёмных бакетов (1.0=выкл, <1=проигрывают)
+            dark_vthr = cfg.get("side_color_dark_val_thr", 140)    # граница «тёмного» для A/B (по max-каналу)
+            clusters = []                                          # [sum_rgb(3), cnt, length]
+            valid_len = 0.0; dd = d0
+            while dd <= d1:
+                c = px_mm(*(p + n * dd))
+                s = int(c[0]) + int(c[1]) + int(c[2])
+                if not is_dark(c) and s < white_sum and max(c) >= min_val:  # не обводка/фон/(A)тёмное
+                    w = ds * (dark_w if max(c) < dark_vthr else 1.0)        # B: тёмное весит меньше
+                    valid_len += w
+                    for cl in clusters:
+                        m = [cl[0][k] / cl[1] for k in range(3)]
+                        if max(abs(m[k] - int(c[k])) for k in range(3)) < clu_thr:
+                            for k in range(3):
+                                cl[0][k] += int(c[k])
+                            cl[1] += 1; cl[2] += w; break
+                    else:
+                        clusters.append([[int(c[0]), int(c[1]), int(c[2])], 1, w])
+                dd += ds
+            if clusters and valid_len > 0:
+                dom = max(clusters, key=lambda cl: cl[2])           # бакет с макс суммарной длиной
+                min_frac = cfg.get("side_color_dominant_min_frac", 0.45)
+                if dom[2] / valid_len >= min_frac:                 # уверенный доминант -> его средний цвет
+                    mean = tuple(int(dom[0][k] / dom[1]) // 4 * 4 for k in range(3))
+                    return mean, True
+            # неоднозначно / всё тёмное -> обычный кромочный путь ниже
         look = cfg.get("outline_fill_lookahead_mm", 16.0)           # заглянуть глубже на столько мм
         jump = cfg.get("outline_fill_min_jump", 120)                # «намного ярче» = скачок суммы RGB
         dark_fill = cfg.get("outline_fill_dark_max", 150)           # кромка считается «тёмной» (возможно цветная обводка)
@@ -394,16 +464,24 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
                 if nb is not None:
                     raw_c[k] = nb
         raw = [(float(fs[k]), float(fs[k + 1]), raw_c[k]) for k in range(M)]          # РЕАЛЬНЫЕ цвета кромки (без accentize)
-        bands = _simplify_bands(raw, fallback, cfg.get("hue_merge_deg", 20.0))        # слить соседние близкие по тону
-        s["bands"] = _merge_small_bands(bands, cfg.get("band_merge_small_frac", 0.03))  # убрать лишь совсем тонкие
+        vmm = cfg.get("band_value_merge_max") if cfg.get("side_color_dominant") else None  # не сливать разную яркость
+        bands = _simplify_bands(raw, fallback, cfg.get("hue_merge_deg", 20.0), vmm)    # слить соседние близкие по тону
+        bands = _merge_small_bands(bands, cfg.get("band_merge_small_frac", 0.03))     # убрать лишь совсем тонкие
+        if cfg.get("side_color_drop_dark_bands"):                                     # C: тёмные полосы -> светлый сосед
+            bands = _drop_dark_bands(bands, cfg.get("side_color_dark_band_val", 140))
+        s["bands"] = bands
 
 
 def strip_band_quads(s):
     """Для полосы с s['bands'] вернуть [(quad_pts, color)] в координатах раскладки."""
     poly = s["poly"]
-    left, right = _edges_top_down(poly, s.get("waist") is not None)
+    dome_n = s.get("dome_n") or 0
+    left, right = _edges_top_down(poly, s.get("waist") is not None, dome_n)
     out = []
-    for f0, f1, c in s.get("bands", []):
+    bands = s.get("bands", [])
+    if dome_n and dome_n >= 2 and bands:                                 # шапка-купол = цвет верхней полосы
+        out.append((list(poly[:dome_n]), bands[0][2]))
+    for f0, f1, c in bands:
         l0, r0 = _interp(left, f0), _interp(right, f0)
         l1, r1 = _interp(left, f1), _interp(right, f1)
         out.append(([l0, r0, r1, l1], c))

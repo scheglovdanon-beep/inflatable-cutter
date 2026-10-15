@@ -94,3 +94,16 @@ union_batch_size: 300
 shoulder_round: true
 shoulder_dome_frac: 0.5
 shoulder_seam_frac: 0.35
+arm_hole_top_at_seam: true   # верх отверстия руки = верхнее ребро боковины (стык с передом)
+
+# --- покраска боковин: доминирующий цвет среза + удаление тёмного (вариант A) ---
+side_color_dominant: true
+side_color_depth_mm: 60
+band_value_merge_max: 60
+side_color_min_value: 124
+side_color_dark_val_thr: 124
+
+# --- длина купола в гассете + сужение между 2 руками + бот-чекер швов ---
+dome_in_gusset_len: true   # купол ВХОДИТ в длину боковины (сторона=стыку с передом), не добавляется сверху
+arm_narrow_between: true   # 2 руки (рез по 1 точке): гассет между верхними точками реза -> ×1/1.7
+seam_check: true           # бот-чекер совпадения сшивных рёбер + подсветка на раскрое

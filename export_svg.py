@@ -120,9 +120,22 @@ def build_layout(page, cfg):
     fig = get_front_figure(page, cfg)
 
     cut_arms = []                                                # отрезанные руки (PT-контуры) — режем ДО раскладки
+    _body_precut = None
     if cfg.get("arm_cut") == "armpit":
         from arm import cut_waving_arms
+        _body_precut = fig.contour_pt                             # контур С руками (для верх-точек реза)
         fig.contour_pt, cut_arms = cut_waving_arms(page, fig.contour_pt, cfg, strict=True)  # ТЕЛО переда БЕЗ руки
+        # МИН. ДЛИНА РЕЗА = Ø отверстия: если меньше arm_hole_min_mm (165) — ПРОПОРЦ. УВЕЛИЧИТЬ фигуру+руку
+        if cfg.get("arm_hole_from_cut") and cut_arms:
+            import math as _m
+            _s0 = fig.s * PT2MM
+            _Ls = [_m.hypot(c["blade_pt"][0][0] - c["blade_pt"][1][0], c["blade_pt"][0][1] - c["blade_pt"][1][1]) * _s0
+                   for c in cut_arms if c.get("blade_pt")]
+            _minh = cfg.get("arm_hole_min_mm", 165)
+            if _Ls and min(_Ls) < _minh - 0.5:                   # мин. рез меньше 165 -> растим фигуру до 165
+                _f = _minh / min(_Ls)
+                fig.s *= _f
+                cfg["target_height_mm"] = cfg.get("target_height_mm", 2700) * _f   # зад/днище — в том же масштабе
 
     cut_dets = []                                                # ВШИВНЫЕ ДЕТАЛИ (ложка и пр.) — режем из переда
     if cfg.get("manual_details"):
@@ -130,19 +143,62 @@ def build_layout(page, cfg):
         fig.contour_pt, cut_dets = cut_details(page, fig.contour_pt, cfg, strict=True)
 
     contour_mm = smooth_front(contour_to_mm(fig), cfg)
-    g = build_gusset(contour_mm, cfg); classify_sides(g, contour_mm)
-    # 1 РУКА + РЕЗ ПО 1 ТОЧКЕ: горизонталь от верха реза -> весь гассет ВЫШЕ у́же на ratio (голова/шея)
+    g = build_gusset(contour_mm, cfg)
+    # 1 РУКА + РЕЗ ПО 1 ТОЧКЕ: линия реза (горизонталь на уровне верха реза). Боковину, которая
+    # ПЕРЕСЕКАЕТ линию, РЕЖЕМ на 2 детали по линии. Выше линии -> вся под 1/ratio; ниже -> узкая
+    # сторона с 1/ratio ПЛАВНО (длина arm_narrow_blend_mm) расширяется до стандарта.
     if cfg.get("arm_narrow_upper") and len(cut_arms) == 1 and cut_arms[0].get("one_point") and cut_arms[0].get("blade_pt"):
+        from sides import narrow_upper_gusset
         _bl = cut_arms[0]["blade_pt"]; _fmm = fig.s * PT2MM
-        _cut_top_y = min(_bl[0][1], _bl[1][1]) * _fmm                 # верх реза (мин y) в мм
-        _ratio = cfg.get("arm_narrow_ratio", cfg.get("shoulder_next_ratio", 1.7))
-        _gl = g["gusset_line"]
-        for _s in g["segments"]:
-            _my = _gl.interpolate((_s["arc0"] + _s["arc1"]) / 2.0).coords[0][1]
-            if _my < _cut_top_y - 1:                                  # сегмент ВЫШЕ линии реза -> у́же
-                for _k in ("thickness", "t0", "t1"):
-                    if _k in _s:
-                        _s[_k] = _s[_k] / _ratio
+        narrow_upper_gusset(g, min(_bl[0][1], _bl[1][1]) * _fmm,
+                            ratio=cfg.get("arm_narrow_ratio", cfg.get("shoulder_next_ratio", 1.7)),
+                            blend_mm=float(cfg.get("arm_narrow_blend_mm", 400.0)))
+    # 2 РУКИ: гассет по дуге МЕЖДУ верхними точками реза плеч (поверху) -> × 1/ratio.
+    if cfg.get("arm_narrow_between") and len(cut_arms) == 2 and _body_precut is not None \
+            and all(c.get("one_point", True) for c in cut_arms):     # сужение только при резе по 1 точке (не хорда)
+        import numpy as _np
+        from arm import blade_perp
+        from shapely.geometry import LineString as _LS, Point as _Pt
+        from sides import narrow_between_arms
+        _fmm = fig.s * PT2MM
+        _bc = fig.contour_pt                                        # тело БЕЗ рук (кадр до smooth)
+        _ox = _bc.bounds[0] - contour_mm.bounds[0] / _fmm           # сдвиг кадра детекта -> кадр гассета (smooth_front)
+        _oy = _bc.bounds[1] - contour_mm.bounds[1] / _fmm
+        _gl = g["gusset_line"]; _arcs = []
+        for _ca in cut_arms:
+            _fp = _np.asarray(_ca["f"], float)
+            _p0, _p1 = blade_perp(_body_precut, _fp, _np.asarray(_ca["tip"], float), cfg)
+            _xi = _body_precut.exterior.intersection(_LS([tuple(_p0), tuple(_p1)]))
+            _cr = [(gm.x, gm.y) for gm in getattr(_xi, "geoms", [_xi]) if gm.geom_type == "Point"]
+            _cr.sort(key=lambda p: (p[0] - _fp[0]) ** 2 + (p[1] - _fp[1]) ** 2)
+            if len(_cr) < 2:
+                continue
+            _e0, _e1 = _np.array(_cr[0]), _np.array(_cr[1]); _top = _e0 if _e0[1] < _e1[1] else _e1
+            _tm = ((_top[0] - _ox) * _fmm, (_top[1] - _oy) * _fmm)
+            _arcs.append(_gl.project(_Pt(*_tm)))
+        if len(_arcs) == 2:
+            narrow_between_arms(g, _arcs[0], _arcs[1],
+                                ratio=cfg.get("arm_narrow_ratio", cfg.get("shoulder_next_ratio", 1.7)))
+    classify_sides(g, contour_mm)
+    # КОНСТАНТА: ширина гассета там, где ОТВЕРСТИЕ руки, не меньше Ø+10мм (по 5мм с каждой стороны).
+    if cut_arms:
+        import math as _math
+        from shapely.geometry import Point as _Pt
+        _gl = g["gusset_line"]; _fmm2 = fig.s * PT2MM
+        for _ca in cut_arms:
+            _bl2 = _ca.get("blade_pt"); _f2 = _ca.get("f")
+            if _f2 is None:
+                continue
+            if cfg.get("arm_hole_from_cut") and _bl2:             # Ø = длина реза (уже учтён рост фигуры до 165)
+                _hd = _math.hypot(_bl2[0][0] - _bl2[1][0], _bl2[0][1] - _bl2[1][1]) * _fmm2
+            else:
+                _hd = cfg.get("arm_hole_diameter_mm", 250)
+            _wmin = _hd + 10.0
+            _arc = _gl.project(_Pt(_f2[0] * _fmm2, _f2[1] * _fmm2))
+            _seg = next((s for s in g["segments"] if s["arc0"] <= _arc <= s["arc1"]), None)
+            if _seg and (_seg["t0"] < _wmin or _seg["t1"] < _wmin):
+                _seg["t0"] = max(_seg["t0"], _wmin); _seg["t1"] = max(_seg["t1"], _wmin)
+                _seg["thickness"] = max(_seg["t0"], _seg["t1"])
     lay = build_fitting_layout(contour_mm, g, base=build_base(g, cfg))
     arm_pts = None
     if cfg.get("make_appendages", True):                         # рука/кисть/запаска (выкл для фигур без руки)
@@ -206,14 +262,15 @@ def build_layout(page, cfg):
             for ca in cut_arms:                                # ОТВЕРСТИЕ под КАЖДУЮ руку (Ø = длина реза при флаге)
                 _hd = _cut_hole_d(ca)
                 place_armpit_hole(lay, g, contour_mm, ca["f"], fig, cfg, dy_mm=ca.get("hole_dy", 0.0),
-                                  r_override=(_hd / 2.0) if _hd else None)
+                                  r_override=(_hd / 2.0) if _hd else None, one_point=ca.get("one_point", True))
         else:                                                  # отрезанная рука ОДНИМ куском (текстура)
             from arm import place_arm_piece
             for ca in cut_arms:
                 ap = place_arm_piece(lay, ca["poly_pt"], fig, cfg, page)
                 if arm_pts is None:
                     arm_pts = ap
-                place_armpit_hole(lay, g, contour_mm, ca["f"], fig, cfg, dy_mm=ca.get("hole_dy", 0.0))
+                place_armpit_hole(lay, g, contour_mm, ca["f"], fig, cfg, dy_mm=ca.get("hole_dy", 0.0),
+                                  one_point=ca.get("one_point", True))
 
     if cut_dets:                                                 # ВШИВНЫЕ ДЕТАЛИ: лекало (перёд/зад/гассет) + отверстие
         from arm import build_detail, place_detail, _detail_main_color
@@ -230,8 +287,9 @@ def build_layout(page, cfg):
                               r_override=d["opening"] / (2.0 * _math.pi), hole_list="detail_holes")
 
     if cfg.get("shoulder_round"):                                # ЗАКРУГЛЕНИЕ ГАССЕТА у плеча (купол + вытачка)
-        from sides import round_gusset_shoulder
+        from sides import round_gusset_shoulder, raise_hole_to_zahod_top
         round_gusset_shoulder(lay, cfg)
+        raise_hole_to_zahod_top(lay, cfg)                            # верх дыры = верх захода с передом (на куполе)
 
     if cfg.get("make_spare_arm", True) and (lay.get("arm_pieces") or lay.get("hand_pieces")):
         from arm import add_spare_arm                             # запаска — если есть детали руки (любой путь)
@@ -266,6 +324,12 @@ def build_layout(page, cfg):
                  if (bl := ca.get("blade_pt"))]
         if marks:
             lay["arm_cut_marks"] = marks
+    if cfg.get("seam_check"):                                    # БОТ-ЧЕКЕР сшивных рёбер (TZ_seam_checker.md)
+        from seam_check import check_seams, format_report
+        lay["seam_issues"] = check_seams(lay, fig, g, cfg)
+        _rep, _nf = format_report(lay["seam_issues"])
+        if _nf:
+            print(f"[seam_check] НЕСОВПАДЕНИЯ РЁБЕР: {_nf} FAIL\n{_rep}")
     return lay, fig, contour_mm, g, arm_pts, seam_mm
 
 

@@ -5,7 +5,7 @@
 """
 import argparse, os, sys
 import pymupdf, yaml, numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 from sides import (get_front_figure, contour_to_mm, build_gusset, classify_sides,         # noqa: E402
@@ -106,6 +106,13 @@ def main():
     # ----- ПЕРЁД: контур-шов (сплошной, 0.2мм) + подпись -----
     dr.line([T(x, y) for x, y in lay["front"].exterior.coords], fill=(0, 0, 0), width=lw)
     label(lay["front"], "PERED")
+    _ofp = cfg.get("overlay_front_points")                          # точки на переде (в мм контура), напр. верх реза плеча
+    if _ofp:
+        rr = max(6, int(40 * sc))
+        for _i, (_px, _py) in enumerate(_ofp):
+            cx, cy = pt2cv(_px / f_mm, _py / f_mm)                   # точки заданы в мм контура -> в PT для _ftf
+            dr.ellipse([cx - rr, cy - rr, cx + rr, cy + rr], fill=(220, 0, 0), outline=(255, 255, 255), width=max(2, rr // 4))
+            dr.text((cx + rr + 2, cy - rr), f"верх реза {_i+1}", fill=(200, 0, 0))
 
     # ----- ЗАД: зеркальная текстура переда + контур + подпись -----
     bk = lay.get("back")
@@ -283,6 +290,25 @@ def main():
             r = ah2["seam_r"]; cx, cy = ah2["cx"], ah2["cy"]
             dr.ellipse([T(cx - r, cy - r), T(cx + r, cy + r)], outline=(0, 0, 0), width=lw)
     dr.text((M, 10), f"kontury {cfg.get('line_width_mm',0.2)} mm sploshnye | pripusk +{seam_mm:.0f} mm", fill=(0, 0, 0))
+
+    if cfg.get("seam_check") and lay.get("seam_issues") is not None:    # ПОДСВЕТКА несовпадающих рёбер (seam checker)
+        try:
+            _scf = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 15)
+        except Exception:
+            _scf = ImageFont.load_default()
+        fails = [it for it in lay["seam_issues"] if not it["ok"]]
+        for it in fails:                                                # красное ребро + Δ, если есть геометрия (pts)
+            if it.get("pts") and len(it["pts"]) == 2:
+                p0, p1 = it["pts"]
+                dr.line([T(*p0), T(*p1)], fill=(230, 0, 0), width=max(3, lw * 4))
+                mx, my = T((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2)
+                dr.text((mx + 4, my), f"d{it['delta']:.0f}", fill=(230, 0, 0), font=_scf)
+        hdr = f"SEAM CHECK: FAIL {len(fails)}/{len(lay['seam_issues'])}" if fails else \
+              f"SEAM CHECK: OK ({len(lay['seam_issues'])})"
+        dr.text((M, 28), hdr, fill=(230, 0, 0) if fails else (0, 150, 0), font=_scf)
+        for k, it in enumerate(fails[:12]):
+            dr.text((M, 48 + k * 18), f"  {it['stuk']}: {it['a_len']:.0f} vs {it['b_len']:.0f} (d{it['delta']:.0f})",
+                    fill=(230, 0, 0), font=_scf)
 
     out_png = getattr(args, "out", None) or "out/texture_view.png"
     os.makedirs(os.path.dirname(out_png) or ".", exist_ok=True)

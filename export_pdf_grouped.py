@@ -434,6 +434,18 @@ def _rollpack_svg(parts, roll_h, gap, lay, y_off=0.0, suffix="_печать", in
     except Exception:                                                 # фолбэк на сеточный нестер
         from pack import nest_shapes
         placements, nested_w = nest_shapes(shapes, roll_h, gap)
+    try:                                                              # ЧЕКЕР ПОЛНОТЫ: все детали выложены на холст?
+        from seam_check import check_print_complete
+        _pc = check_print_complete(parts, [i for i, _ in shapes], placements, roll_h)
+        _nf = [it for it in _pc if not it["ok"]]
+        lay.setdefault("print_issues", []).extend(_pc)
+        if _nf:
+            print(f"[seam_check] НА ХОЛСТ {int(roll_h)}мм НЕ ВЫЛОЖЕНЫ {len(_nf)}/{len(shapes)} деталей: "
+                  + ", ".join(it["a"] for it in _nf))
+        else:
+            print(f"[seam_check] печать: все {len(shapes)} деталей выложены на холст {int(roll_h)}мм (ширина рулона {nested_w:.0f}мм)")
+    except Exception as _e:
+        print("[seam_check] проверка полноты печати не выполнена:", _e)
     gy = f'translate(0,{y_off:.3f}) '                                  # весь рулон — ниже фигуры
     out = []
     for idx, (name, body) in enumerate(parts):

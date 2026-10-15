@@ -674,7 +674,8 @@ def cut_waving_arms(page, contour_pt, cfg, strict=True):
         body_pt = body2
         bl = a.get("blade")
         cut.append({"poly_pt": arm_poly, "f": a["f"], "tip": a["tip"],
-                    "blade_pt": [tuple(bl[0]), tuple(bl[1])] if bl else None})
+                    "blade_pt": [tuple(bl[0]), tuple(bl[1])] if bl else None,
+                    "one_point": bl is None})                          # рез от подмышки (1 точка) vs хорда 2 точки
     return body_pt, cut
 
 
