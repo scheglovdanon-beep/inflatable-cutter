@@ -231,3 +231,25 @@ canvas{display:block; cursor:crosshair; max-width:100%; height:auto; border-radi
 .armlayimgs{display:flex; gap:12px; flex-wrap:wrap; margin-top:8px}
 .armlayimg{max-width:100%; width:auto; max-height:420px; border:1px solid var(--line); border-radius:10px; background:#fff; cursor:zoom-in}
 @media (max-width:860px){ .s5row{flex-direction:column} }
+
+/* ---------- Бот-чекер: панель перепроверки ---------- */
+.check-panel{ margin:10px 0; border:1px solid #d7dde5; border-radius:8px; padding:8px 10px; background:#fafbfc; }
+.check-summary{ font-weight:700; padding:6px 8px; border-radius:6px; margin-bottom:8px; }
+.check-summary.sum-ok{ background:#e6f7ea; color:#137a2e; }
+.check-summary.sum-fail{ background:#fdeaea; color:#b11; }
+.chk-row{ display:flex; align-items:center; gap:10px; padding:5px 8px; border-radius:6px;
+  font-size:13px; opacity:.45; transform:translateX(-4px);
+  transition:opacity .25s, transform .25s, background .25s; }
+.chk-row .chk-ico{ width:18px; text-align:center; font-weight:700; }
+.chk-row .chk-name{ flex:0 0 46%; }
+.chk-row .chk-vals{ flex:1; color:#667; font-size:12px; }
+.chk-row .chk-res{ font-weight:700; font-size:12px; }
+.chk-wait{ opacity:.45; }
+.chk-active{ opacity:1; transform:translateX(0); background:#eef3fb; }
+.chk-active .chk-ico{ animation:chkspin .7s linear infinite; }
+@keyframes chkspin{ to{ transform:rotate(360deg); } }
+.chk-ok{ opacity:1; transform:translateX(0); background:#eefaf1; }
+.chk-ok .chk-ico, .chk-ok .chk-res{ color:#15a03a; }
+.chk-fail{ opacity:1; transform:translateX(0); background:#fdeeee; }
+.chk-fail .chk-ico, .chk-fail .chk-res{ color:#d22; }
+#btnCheck{ margin-top:6px; }

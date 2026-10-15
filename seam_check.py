@@ -18,14 +18,23 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pdf")
     ap.add_argument("--config", required=True)
+    ap.add_argument("--json", action="store_true", help="выдать результат в JSON (для дашборда)")
     a = ap.parse_args()
     cfg = yaml.safe_load(open(a.config, encoding="utf-8"))
     page = pymupdf.open(a.pdf)[0]
     lay, fig, cm, g, arm_pts, seam = build_layout(page, cfg)
     issues = check_seams(lay, fig, g, cfg)
-    report, nfail = format_report(issues)
+    nfail = sum(1 for it in issues if not it["ok"])
+    if a.json:
+        import json
+        out = [{"stuk": it["stuk"],
+                "a": f"{it['a']}={it['a_len']:.0f}" if it.get("a") else "",
+                "b": f"{it['b']}={it['b_len']:.0f}" if it.get("b") else "",
+                "delta": round(it["delta"], 1), "ok": bool(it["ok"])} for it in issues]
+        print(json.dumps({"issues": out, "total": len(issues), "fail": nfail}, ensure_ascii=False))
+        sys.exit(0)
+    report, _ = format_report(issues)
     print(report)
-    print("\n(подсветка на раскрое: texture_view.py ... --config <cfg с seam_check: true>)")
     sys.exit(1 if nfail else 0)
 
 

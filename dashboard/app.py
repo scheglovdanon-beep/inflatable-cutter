@@ -800,6 +800,30 @@ def _worker():
 threading.Thread(target=_worker, daemon=True).start()
 
 
+@app.route("/api/check/<sid>", methods=["POST"])
+def api_check(sid):
+    """Бот-чекер: прогнать проверку сшивных рёбер по уже собранному cfg сессии. JSON-результат."""
+    d = _sdir(sid)
+    cfg_path = os.path.join(d, "cfg.yaml"); pdf_in = os.path.join(d, "macet.pdf")
+    if not (os.path.isfile(cfg_path) and os.path.isfile(pdf_in)):
+        return jsonify(error="Сначала соберите фигуру — нужен cfg от сборки."), 400
+    runcap = os.path.join(ROOT, "run_capped.sh")
+    cmd = [runcap, os.path.join(ROOT, "venv/bin/python"),
+           os.path.join(ROOT, "seam_check.py"), pdf_in, "--config", cfg_path, "--json"]
+    try:
+        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, env=dict(os.environ), timeout=1200)
+    except subprocess.TimeoutExpired:
+        return jsonify(error="таймаут проверки (>20 мин)"), 500
+    for line in reversed((r.stdout or "").strip().splitlines()):       # JSON в последней {…}-строке
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return jsonify(**json.loads(line))
+            except Exception:
+                break
+    return jsonify(error="не удалось выполнить проверку:\n" + (r.stderr or r.stdout or "")[-800:]), 500
+
+
 @app.route("/api/build", methods=["POST"])
 def build():
     """Поставить сборку В ОЧЕРЕДЬ (выполняется по одной). Возвращает job_id."""

@@ -392,6 +392,46 @@ $("#btnBuild").onclick=async()=>{
   finally{ busy($("#btnBuild"),false); }
 };
 
+// ---------- Бот-чекер: перепроверка фигуры с анимацией ----------
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+$("#btnCheck").onclick=async()=>{
+  if(!S.sid){ msg("#checkMsg","сначала загрузите макет и соберите фигуру","err"); return; }
+  const panel=$("#checkPanel"), list=$("#checkList"), sum=$("#checkSummary");
+  busy($("#btnCheck"),true,"проверяю");
+  msg("#checkMsg","строю фигуру и проверяю рёбра…","spin");
+  panel.style.display="none"; list.innerHTML=""; sum.innerHTML=""; sum.className="check-summary";
+  try{
+    const r=await fetch(`/api/check/${S.sid}`,{method:"POST"});
+    const j=await r.json();
+    if(j.error){ msg("#checkMsg",j.error,"err"); return; }
+    msg("#checkMsg",""); panel.style.display="block";
+    const items=j.issues||[];
+    items.forEach(it=>{                                  // все строки сперва в состоянии «ожидает»
+      const row=document.createElement("div"); row.className="chk-row chk-wait";
+      const vals=[it.a,it.b].filter(Boolean).join(" ↔ ")+(it.delta?` (Δ${it.delta})`:"");
+      row.innerHTML=`<span class="chk-ico">•</span><span class="chk-name"></span>`+
+                    `<span class="chk-vals"></span><span class="chk-res"></span>`;
+      row.querySelector(".chk-name").textContent=it.stuk;
+      row.querySelector(".chk-vals").textContent=vals;
+      list.appendChild(row);
+    });
+    const rows=[...list.children];
+    for(let i=0;i<items.length;i++){                     // анимированно проверяем по одному
+      const row=rows[i], it=items[i];
+      row.classList.add("chk-active"); row.querySelector(".chk-ico").textContent="⏳";
+      row.scrollIntoView({block:"nearest",behavior:"smooth"});
+      await sleep(240);
+      row.classList.remove("chk-wait","chk-active"); row.classList.add(it.ok?"chk-ok":"chk-fail");
+      row.querySelector(".chk-ico").textContent=it.ok?"✓":"✗";
+      row.querySelector(".chk-res").textContent=it.ok?"OK":"НЕ СХОДИТСЯ";
+      await sleep(it.ok?90:260);
+    }
+    sum.className="check-summary "+(j.fail?"sum-fail":"sum-ok");
+    sum.textContent=j.fail? `НЕ СХОДИТСЯ: ${j.fail} из ${j.total}` : `Всё сходится — ${j.total} проверок пройдено ✓`;
+  }catch(e){ msg("#checkMsg","ошибка проверки: "+e,"err"); }
+  finally{ busy($("#btnCheck"),false); }
+};
+
 // ---------- Очередь сборки (опрос + отрисовка) ----------
 let qTimer=null;
 function startQueue(){ if(!qTimer){ pollQueue(); qTimer=setInterval(pollQueue, 2500); } }
