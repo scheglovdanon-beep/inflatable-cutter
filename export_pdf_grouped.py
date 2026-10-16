@@ -20,6 +20,29 @@ def _circle(cx, cy, r, stroke, sw):
     return f'<circle cx="{cx:.3f}" cy="{cy:.3f}" r="{r:.3f}" fill="none" stroke="{stroke}" stroke-width="{sw:.3f}"/>'
 
 
+# ---------- ПОРЯДОК СЛОЁВ ДЕТАЛИ: цвета СВЕРХУ (чтобы правки цветов кликались первыми в Corel) ----------
+# Сзади -> вперёд: припуск(+10) -> цветные линии вшива -> контур реза -> ЦВЕТА/текстура(верх).
+_LAYER_Z = {"seam": 0, "seamlines": 1, "contour": 2, "colors": 3}
+
+
+def _emit_layers(tagged, colors_top):
+    """tagged=[(layer, svg), ...] в ПОРЯДКЕ ДОБАВЛЕНИЯ (legacy). colors_top=True -> стабильно
+    пересортировать сзади→вперёд по _LAYER_Z (цвета наверх). colors_top=False -> как было."""
+    if colors_top:
+        tagged = sorted(tagged, key=lambda te: _LAYER_Z.get(te[0], 2))
+    return [e for _l, e in tagged]
+
+
+def _filled(pts, fill, sw, colors_top, stroke="#000"):
+    """Залитый контур. colors_top=True -> РАЗДЕЛИТЬ на заливку(цвет, слой colors) и обводку
+    (контур, слой contour), чтобы цвет был сверху и кликался первым. Иначе — один путь (legacy).
+    Возвращает список [(layer, svg), ...]."""
+    if colors_top and fill and fill != "none":
+        return [("colors", _poly(pts, fill=fill, stroke="none", sw=0)),
+                ("contour", _poly(pts, fill="none", stroke=stroke, sw=sw))]
+    return [("contour", _poly(pts, fill=fill, stroke=stroke, sw=sw))]
+
+
 def _bez(p0, p1, p2, p3, n=6):
     """Точки кубической кривой Безье (сэмплинг для перевода текстуры в полигоны)."""
     out = []
@@ -311,22 +334,24 @@ def _hand_tex(page, poly, src, cid, zoom=6.0):
             f'preserveAspectRatio="none" xlink:href="data:image/png;base64,{png}"/></g>']
 
 
-def _piece_svg(page, p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill="#f5f5f5"):
-    """SVG-элементы одной детали руки/кисти: текстура/контур + припуск."""
-    poly = p["poly"]; body = []
+def _piece_svg(page, p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill="#f5f5f5", colors_top=True):
+    """SVG-элементы одной детали руки/кисти: текстура/контур + припуск. Порядок слоёв — через
+    _emit_layers (цвета сверху при colors_top)."""
+    poly = p["poly"]; tagged = []
     if kind == "hand":
         if p.get("src") is not None:
-            body += _hand_tex(page, poly, p["src"], cid)
+            for el in _hand_tex(page, poly, p["src"], cid):
+                tagged.append(("colors", el))
+            tagged.append(("contour", _poly(list(poly.exterior.coords), stroke="#000000", sw=lw)))
         else:                                                        # полоска-боковина = цвет кисти
-            body.append(_poly(list(poly.exterior.coords), fill=hand_fill, stroke="none", sw=0))
-        body.append(_poly(list(poly.exterior.coords), stroke="#000000", sw=lw))
+            tagged += _filled(list(poly.exterior.coords), hand_fill, lw, colors_top, stroke="#000000")
     else:                                                            # база/плечо/предплечье — цвет своей зоны
         pc = p.get("fill")
         fill = ("#%02x%02x%02x" % tuple(int(v) for v in pc)) if pc else arm_fill
-        body.append(_poly(list(poly.exterior.coords), fill=fill, stroke="#000000", sw=lw))
+        tagged += _filled(list(poly.exterior.coords), fill, lw, colors_top, stroke="#000000")
     if p.get("seam"):
-        body.append(_poly(list(p["seam"].exterior.coords), stroke="#000000", sw=lw))
-    return body
+        tagged.append(("seam", _poly(list(p["seam"].exterior.coords), stroke="#000000", sw=lw)))
+    return _emit_layers(tagged, colors_top)
 
 
 _RU = {"predplechie": "Предплечье", "plecho": "Плечо", "baza": "База",
@@ -517,6 +542,7 @@ def main():
     nextid = lambda: (cc.__setitem__(0, cc[0] + 1) or f"clip{cc[0]}")
 
     pieces = []                                                       # (name, [svg-элементы])
+    colors_top = cfg.get("colors_top_layer", True)                    # цвета — ВЕРХНИМ слоём (правки в Corel)
 
     if lay.get("roll"):                                               # фон-прямоугольник = рулон (1440 x длина)
         pieces.append((f"rulon_{int(lay['roll'])}mm",
@@ -609,10 +635,11 @@ def main():
         """Добавить деталь переда/зада в pieces. Шире холста -> N полос РЯДОМ (зазор tgap), иначе целиком."""
         tl = _vtiles(panel_poly, holst, seam_mm_v) if _split else None
         if not tl:                                                    # целиком
-            pieces.append((prefix, [_design_raster(page, src_bbox, tf, panel_poly, nextid()),
-                                    _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw),
-                                    _poly(list(panel_seam.exterior.coords), stroke="#000000", sw=lw),
-                                    _arc_paths(arcs, panel_poly, f"seam_{prefix}")]))
+            tagged = [("colors", _design_raster(page, src_bbox, tf, panel_poly, nextid())),
+                      ("contour", _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw)),
+                      ("seam", _poly(list(panel_seam.exterior.coords), stroke="#000000", sw=lw)),
+                      ("seamlines", _arc_paths(arcs, panel_poly, f"seam_{prefix}"))]
+            pieces.append((prefix, _emit_layers(tagged, colors_top)))
             return
         cursor = None
         for k, (tp, ts, bx0, bx1) in enumerate(tl):
@@ -620,10 +647,11 @@ def main():
             if cursor is None:
                 cursor = ts.bounds[0]
             dx = cursor - ts.bounds[0]                                # сдвиг так, чтобы полосы легли В РЯД с зазором
-            body = [_design_raster(page, src_bbox, tf, tp, nextid()),
-                    _poly(list(tp.exterior.coords), stroke="#000", sw=lw),
-                    _poly(list(ts.exterior.coords), stroke="#000000", sw=lw),
-                    _arc_paths(_clip_arcs_x(arcs, bx0, bx1), tp, f"seam_{nm}")]   # цветовые маркеры в припуске
+            tagged = [("colors", _design_raster(page, src_bbox, tf, tp, nextid())),
+                      ("contour", _poly(list(tp.exterior.coords), stroke="#000", sw=lw)),
+                      ("seam", _poly(list(ts.exterior.coords), stroke="#000000", sw=lw)),
+                      ("seamlines", _arc_paths(_clip_arcs_x(arcs, bx0, bx1), tp, f"seam_{nm}"))]
+            body = _emit_layers(tagged, colors_top)                    # цветовые маркеры в припуске
             if abs(dx) > 1e-6:                                        # та же деталь, просто сдвинута РЯДОМ
                 body = [f'<g transform="translate({dx:.3f},0)">'] + body + ["</g>"]
             pieces.append((nm, body))
@@ -661,7 +689,7 @@ def main():
         return res
 
     for s in lay["strips"]:
-        body = [_poly(q, fill=HEX(c), stroke="none", sw=0) for q, c in strip_band_quads(s)]
+        tagged = [("colors", _poly(q, fill=HEX(c), stroke="none", sw=0)) for q, c in strip_band_quads(s)]
         # цветной ключ: тот же цвет, что дуга переда (_palette[i]), вдоль ОБОИХ длинных рёбер
         # (стык с передом и с задом), ЦЕЛИКОМ в кольце припуска, с зазором от чёрного контура.
         cen = np.asarray(_Poly(list(s["poly"])).centroid.coords[0], float)
@@ -675,19 +703,19 @@ def main():
         keycol = HEX(_palette(s["i"]))
         for edge in (le, re):
             d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(edge, cen, off))
-            body.append(f'<path d="{d}" fill="none" stroke="{keycol}" stroke-width="{sw_seam}" stroke-linecap="round"/>')
-        body.append(_poly(list(s["poly"]), stroke="#000", sw=lw))      # контур детали — чёрный
+            tagged.append(("seamlines", f'<path d="{d}" fill="none" stroke="{keycol}" stroke-width="{sw_seam}" stroke-linecap="round"/>'))
+        tagged.append(("contour", _poly(list(s["poly"]), stroke="#000", sw=lw)))   # контур детали — чёрный
         if s.get("seam"):
-            body.append(_poly(list(s["seam"].exterior.coords), stroke="#000000", sw=lw))
+            tagged.append(("seam", _poly(list(s["seam"].exterior.coords), stroke="#000000", sw=lw)))
         if ah and ah.get("piece") == s["i"]:
-            body.append(_circle(ah["cx"], ah["cy"], ah["r"], "#000000", lw))
+            tagged.append(("contour", _circle(ah["cx"], ah["cy"], ah["r"], "#000000", lw)))
             if ah.get("seam_r"):
-                body.append(_circle(ah["cx"], ah["cy"], ah["seam_r"], "#000000", lw))
+                tagged.append(("seam", _circle(ah["cx"], ah["cy"], ah["seam_r"], "#000000", lw)))
         for h in lay.get("arm_holes", []):                            # отверстия рук (список) на своей боковине
             if h.get("piece") == s["i"]:
-                body.append(_circle(h["cx"], h["cy"], h["r"], "#000000", lw))
+                tagged.append(("contour", _circle(h["cx"], h["cy"], h["r"], "#000000", lw)))
                 if h.get("seam_r"):
-                    body.append(_circle(h["cx"], h["cy"], h["seam_r"], "#000000", lw))
+                    tagged.append(("seam", _circle(h["cx"], h["cy"], h["seam_r"], "#000000", lw)))
         # ЗАКРУГЛЕНИЕ ПЛЕЧА: цветная линия купола по зонам сшива — В ТЕЛЕ боковины (едет с деталью в рулон).
         # Смещаем НАРУЖУ в кольцо припуска (как ключ у всех деталей) -> не заходит за контур реза.
         for seg in lay.get("shoulder_arc_segments", []):
@@ -695,46 +723,46 @@ def main():
                 continue
             r, gg, bb = seg["rgb"]
             dd = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(seg["pts"], cen, off))
-            body.append(f'<path d="{dd}" fill="none" stroke="#{r:02x}{gg:02x}{bb:02x}" '
-                        f'stroke-width="{sw_seam}" stroke-linecap="round"/>')
-        pieces.append((f"bokovina_{s['i']}", body))
+            tagged.append(("seamlines", f'<path d="{dd}" fill="none" stroke="#{r:02x}{gg:02x}{bb:02x}" '
+                        f'stroke-width="{sw_seam}" stroke-linecap="round"/>'))
+        pieces.append((f"bokovina_{s['i']}", _emit_layers(tagged, colors_top)))
 
     # КИСТЬ и РУКА — каждая деталь своей группой (текстура по bbox src этого куска)
     for hp in lay.get("hand_pieces", []):
         dds = _dds_for_src(hp["src"]) if hp.get("src") is not None else arm_dds
-        pieces.append((f"kist_{hp['name']}", _piece_svg(page, hp, "hand", dds, f_mm, lw, nextid(), hand_fill=hand_fill)))
+        pieces.append((f"kist_{hp['name']}", _piece_svg(page, hp, "hand", dds, f_mm, lw, nextid(), hand_fill=hand_fill, colors_top=colors_top)))
     for apc in lay.get("arm_pieces", []):
-        pieces.append((f"ruka_{apc.get('name','?')}", _piece_svg(page, apc, "arm", arm_dds, f_mm, lw, nextid(), arm_fill)))
+        pieces.append((f"ruka_{apc.get('name','?')}", _piece_svg(page, apc, "arm", arm_dds, f_mm, lw, nextid(), arm_fill, colors_top=colors_top)))
 
     # ЗАПАСНАЯ РУКА — КАЖДАЯ деталь своей группой (чтобы в рулон укладывались по отдельности,
     # иначе разбросанная колонка-запаска как единый блок не влезает в 1440). Позиции в раскладке те же.
     spare = lay.get("spare_arm", [])
     for i, p in enumerate(spare):
-        body = _piece_svg(page, p, p["kind"], arm_dds, f_mm, lw, nextid(), arm_fill, hand_fill)
+        body = _piece_svg(page, p, p["kind"], arm_dds, f_mm, lw, nextid(), arm_fill, hand_fill, colors_top=colors_top)
         pieces.append((f"zapasnaya_{i}", body))
 
-    # ДНИЩЕ (+ отверстие) и НОЖКА
+    # ДНИЩЕ (+ отверстие) и НОЖКА. Заливка (цвет) отделяется от контура (_filled) -> цвет сверху.
     b = lay.get("base")
     if b:
-        db = [_poly(list(b["dnishe"].exterior.coords), fill=base_fill, stroke="#000", sw=lw)]
+        db = _filled(list(b["dnishe"].exterior.coords), base_fill, lw, colors_top)
         fx, fy = b["fan_c"]; r = b["fan_d"] / 2
-        db.append(_circle(fx, fy, r, "#000000", lw))
+        db.append(("contour", _circle(fx, fy, r, "#000000", lw)))
         if b.get("fan_seam_r"):
-            db.append(_circle(fx, fy, b["fan_seam_r"], "#000000", lw))
+            db.append(("seam", _circle(fx, fy, b["fan_seam_r"], "#000000", lw)))
         if b.get("dnishe_seam"):
-            db.append(_poly(list(b["dnishe_seam"].exterior.coords), stroke="#000000", sw=lw))
-        pieces.append(("dnishe", db))
+            db.append(("seam", _poly(list(b["dnishe_seam"].exterior.coords), stroke="#000000", sw=lw)))
+        pieces.append(("dnishe", _emit_layers(db, colors_top)))
         if b.get("leg_poly") is not None:                            # ножка повёрнута (nesting)
             leg_pts = list(b["leg_poly"].exterior.coords)
         else:
             lx, ly, lwd, lh = b["leg"]
             leg_pts = [(lx, ly), (lx + lwd, ly), (lx + lwd, ly + lh), (lx, ly + lh)]
-        lb = [_poly(leg_pts, fill=base_fill, stroke="#000", sw=lw)]
+        lb = _filled(leg_pts, base_fill, lw, colors_top)
         if b.get("leg_seam"):
-            lb.append(_poly(list(b["leg_seam"].exterior.coords), stroke="#000000", sw=lw))
-        pieces.append(("nozhka", lb))
+            lb.append(("seam", _poly(list(b["leg_seam"].exterior.coords), stroke="#000000", sw=lw)))
+        pieces.append(("nozhka", _emit_layers(lb, colors_top)))
         for ti, tp in enumerate(b.get("transition", [])):               # переход-воронка Ø300->Ø460 (4 части)
-            pieces.append((f"perehod_{ti}", [_poly(list(tp.exterior.coords), fill=base_fill, stroke="#000", sw=lw)]))
+            pieces.append((f"perehod_{ti}", _emit_layers(_filled(list(tp.exterior.coords), base_fill, lw, colors_top), colors_top)))
 
     # ИНСТРУКЦИЯ ПО СБОРКЕ: копия всех деталей, уменьшенная в прямоугольник шириной 30 см,
     # с русскими подписями. Готовим её контент (кладём либо рядом, либо в рулон печати).
