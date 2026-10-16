@@ -179,6 +179,10 @@ def build_layout(page, cfg):
         if len(_arcs) == 2:
             narrow_between_arms(g, _arcs[0], _arcs[1],
                                 ratio=cfg.get("arm_narrow_ratio", cfg.get("shoulder_next_ratio", 1.7)))
+    # ФИНАЛЬНЫЙ ПАС: слайверы короче side_sliver_min_mm сливаем со следующим (после резов сужения,
+    # до classify/раскладки -> bands/купол посчитаются уже на чистых сегментах). Деф. 150мм.
+    from sides import merge_short_segments
+    merge_short_segments(g, cfg.get("side_sliver_min_mm", 150.0))
     classify_sides(g, contour_mm)
     # КОНСТАНТА: ширина гассета там, где ОТВЕРСТИЕ руки, не меньше Ø+10мм (по 5мм с каждой стороны).
     if cut_arms:

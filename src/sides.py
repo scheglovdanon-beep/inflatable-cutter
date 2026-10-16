@@ -992,6 +992,47 @@ def narrow_between_arms(g, arc_a, arc_b, ratio=1.7, snap_mm=150.0):
     g["segments"] = new
 
 
+def _merge_two_segments(A, B):
+    """Слить соседние сегменты A(левый, меньший arc)+B(правый) в один. bands ещё не заданы
+    (color_sides считает их позже) -> объединяем только геометрию. Σ длины сохраняется."""
+    la = A["len"] or 1e-9; lb = B["len"] or 1e-9; tot = la + lb
+    m = dict(A)
+    m["arc1"] = B["arc1"]; m["len"] = B["arc1"] - A["arc0"]
+    m["t0"] = A["t0"]; m["t1"] = B["t1"]
+    m["thickness"] = max(A["t0"], A["t1"], B["t0"], B["t1"])
+    m["yn0"] = A["yn0"]; m["yn1"] = B["yn1"]; m["y_norm"] = (A["yn0"] + B["yn1"]) / 2
+    if B.get("protrusion") and B.get("waist_frac") is not None:            # выступ справа: талия сдвигается
+        m["protrusion"] = True; m["waist"] = B.get("waist")
+        m["waist_frac"] = min(max((la + B["waist_frac"] * lb) / tot, 0.05), 0.95)
+    elif A.get("protrusion") and A.get("waist_frac") is not None:          # выступ слева
+        m["protrusion"] = True; m["waist"] = A.get("waist")
+        m["waist_frac"] = min(max((A["waist_frac"] * la) / tot, 0.05), 0.95)
+    else:
+        m["protrusion"] = False; m.pop("waist", None); m.pop("waist_frac", None)
+    m.pop("bands", None)
+    return m
+
+
+def merge_short_segments(g, min_len=150.0):
+    """ФИНАЛЬНЫЙ ПАС против слайверов (после всех резов сужения): сегмент короче min_len сливаем
+    со СЛЕДУЮЩИМ (последний — с предыдущим). Σ длин = периметр сохраняется (убираем внутр. границу).
+    Выступы («песочные часы») сами слияние не инициируют. Модифицирует g['segments']."""
+    segs = g["segments"]
+    if not segs or len(segs) <= 1 or min_len <= 0:
+        return
+    for _ in range(200):                                                   # backstop от зацикливания
+        idx = next((i for i, s in enumerate(segs)
+                    if s["len"] < min_len and not s.get("protrusion")), None)
+        if idx is None or len(segs) <= 1:
+            break
+        j = idx + 1 if idx + 1 < len(segs) else idx - 1                    # сосед: следующий, иначе предыдущий
+        a, b = (idx, j) if j > idx else (j, idx)                           # a — левый, b — правый
+        segs[a] = _merge_two_segments(segs[a], segs[b]); del segs[b]
+    for k, s in enumerate(segs):
+        s["i"] = k
+    g["segments"] = segs
+
+
 def narrow_upper_gusset(g, cut_top_y, ratio=1.7, blend_mm=400.0):
     """1 рука + рез по 1 точке. Линия реза — горизонталь y=cut_top_y. Боковину, ПЕРЕСЕКАЮЩУЮ
     линию, режем на 2 детали по линии. Выше линии ширина × 1/ratio; ниже узкая сторона (× 1/ratio
