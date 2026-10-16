@@ -412,11 +412,14 @@ def _poly_pool(lay):
     return pool
 
 
-def _rollpack_svg(parts, roll_h, gap, lay, y_off=0.0, suffix="_печать", inst=None, inst_bbox=None):
+def _rollpack_svg(parts, roll_h, gap, lay, y_off=0.0, suffix="_печать", inst=None, inst_bbox=None, pool=None):
     """КОПИЯ всех деталей (+ инструкция), компактно упакованная в РУЛОН высотой roll_h по
     РЕАЛЬНОЙ ФОРМЕ (polygon-nesting: детали ложатся в вогнутости друг друга) — это САМА ПЕЧАТЬ,
-    НИЖЕ фигуры (y_off). Детали-копии двигаются SVG-трансформом. Возвращает (pieces_копии, ширина)."""
-    pool = _poly_pool(lay); seen = {}
+    НИЖЕ фигуры (y_off). Детали-копии двигаются SVG-трансформом. Возвращает (pieces_копии, ширина).
+    pool: {name:[Polygon,...]} — полигоны напрямую (импорт готовых лекал); None -> из фигуры (_poly_pool)."""
+    if pool is None:
+        pool = _poly_pool(lay)
+    seen = {}
     shapes = []                                                       # (idx, poly) — КЛЮЧ ПО ИНДЕКСУ (уникально)
     for idx, (name, _b) in enumerate(parts):
         lst = pool.get(name)
