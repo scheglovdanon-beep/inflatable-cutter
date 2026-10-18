@@ -180,13 +180,15 @@ def _apply_details(cfg, details):
     return cfg
 
 
-def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, clip_outline=None, details=None, shoulder_round=None):
+def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, clip_outline=None, details=None, shoulder_round=None, seam_color_lines=None):
     """Собрать cfg из выбора пользователя. arms = [{f:[x,y], tip:[x,y], blade?:[[..],[..]],
     wrist?:[[..],[..]], elbow?:[[..],[..]]}] в PT. spare — запасная рука (None=как в базе);
     back_copy — зад=копия переда (симметричная фигура; убирает лишние детали руки у 2-рукой);
-    clip_outline — обрезать контур по чёрной обводке (стикер-макеты с запасом заливок)."""
+    clip_outline — обрезать контур по чёрной обводке (стикер-макеты с запасом заливок);
+    seam_color_lines — цвет-ключ вшива на переде/боковинах (деф. ВЫКЛ, пока пробуем без него)."""
     cfg = _base_cfg(size)
     _apply_clip_outline(cfg, clip_outline)
+    cfg["seam_color_lines"] = bool(seam_color_lines)                  # цветные линии вшива — деф. выкл в дашборде
     if shoulder_round is not None:                                    # закругление плеча (купол у шеи)
         cfg["shoulder_round"] = bool(shoulder_round)
     cfg["arm_hole_no_seam"] = True                                    # у отверстия руки без припуск-обводки
@@ -886,7 +888,8 @@ def build():
         arms = _fill_tips(d, size, arms, clip_outline=_co)
     cfg = _build_cfg(size, n, data.get("arms_identical", False), arms,
                      spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co,
-                     details=data.get("details"), shoulder_round=data.get("shoulder_round"))
+                     details=data.get("details"), shoulder_round=data.get("shoulder_round"),
+                     seam_color_lines=data.get("seam_color_lines"))
     jid = uuid.uuid4().hex[:10]
     job = {"id": jid, "sid": sid, "cfg": cfg, "want_svg": bool(data.get("svg", True)),
            "name": (data.get("name") or "макет"), "size": size, "n_arms": n,

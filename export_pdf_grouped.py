@@ -583,12 +583,16 @@ def main():
             res.append(tuple(arr[i] + nrm * d))
         return res
 
+    # Цветные линии ВШИВА (цвет-ключ, где перёд сшивается с боковинами) — под флагом seam_color_lines
+    # (деф. True). Пока отключено в дашборде. Маркер «рука здесь» (arm_cut_marks) оставляем всегда.
+    seam_lines = cfg.get("seam_color_lines", True)
     tf_f = _tex_tf(contour_mm, lay["front"], f_mm); gl = g["gusset_line"]
     front_arcs = []
-    for s in g["segments"]:
-        a0, a1 = s["arc0"], s["arc1"]; n = max(2, int(abs(a1 - a0) / 6))
-        pts = [tf_f(*(np.asarray(gl.interpolate(a0 + (a1 - a0) * k / n).coords[0]) / f_mm)) for k in range(n + 1)]
-        front_arcs.append((HEX(_palette(s["i"])), pts))
+    if seam_lines:
+        for s in g["segments"]:
+            a0, a1 = s["arc0"], s["arc1"]; n = max(2, int(abs(a1 - a0) / 6))
+            pts = [tf_f(*(np.asarray(gl.interpolate(a0 + (a1 - a0) * k / n).coords[0]) / f_mm)) for k in range(n + 1)]
+            front_arcs.append((HEX(_palette(s["i"])), pts))
     for seg in lay.get("arm_cut_marks", []):                          # ЛИНИЯ РЕЗА ПЛЕЧА (где пристыковывается рука)
         front_arcs.append(("#cc5500", list(seg)))                     # dull-оранжевый = «рука здесь»
 
@@ -701,9 +705,10 @@ def main():
         else:
             le, re = _edges_top_down(list(s["poly"]), s.get("waist") is not None)
         keycol = HEX(_palette(s["i"]))
-        for edge in (le, re):
-            d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(edge, cen, off))
-            tagged.append(("seamlines", f'<path d="{d}" fill="none" stroke="{keycol}" stroke-width="{sw_seam}" stroke-linecap="round"/>'))
+        if seam_lines:                                                 # цвет-ключ вдоль рёбер — под флагом seam_color_lines
+            for edge in (le, re):
+                d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(edge, cen, off))
+                tagged.append(("seamlines", f'<path d="{d}" fill="none" stroke="{keycol}" stroke-width="{sw_seam}" stroke-linecap="round"/>'))
         tagged.append(("contour", _poly(list(s["poly"]), stroke="#000", sw=lw)))   # контур детали — чёрный
         if s.get("seam"):
             tagged.append(("seam", _poly(list(s["seam"].exterior.coords), stroke="#000000", sw=lw)))
@@ -718,7 +723,7 @@ def main():
                     tagged.append(("seam", _circle(h["cx"], h["cy"], h["seam_r"], "#000000", lw)))
         # ЗАКРУГЛЕНИЕ ПЛЕЧА: цветная линия купола по зонам сшива — В ТЕЛЕ боковины (едет с деталью в рулон).
         # Смещаем НАРУЖУ в кольцо припуска (как ключ у всех деталей) -> не заходит за контур реза.
-        for seg in lay.get("shoulder_arc_segments", []):
+        for seg in (lay.get("shoulder_arc_segments", []) if seam_lines else []):
             if seg.get("i") != s["i"]:
                 continue
             r, gg, bb = seg["rgb"]
