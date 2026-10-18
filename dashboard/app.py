@@ -106,6 +106,57 @@ def _apply_clip_outline(cfg, clip_outline):
     return cfg
 
 
+# Кэш переднего силуэта: get_front_figure ДОРОГОЙ (union тысяч заливок -> до ~80с на тяжёлых
+# макетах ~20k). Шаги мастера (кандидаты/детект/превью/сборка) звали его КАЖДЫЙ раз заново
+# (кэш _bodies в sides завязан на id(page) и промахивается между HTTP-запросами) -> каждый шаг
+# висел ~80с, пользователь видел «не удалось получить точки». Кэшируем по (sid,size,clip).
+_FIG_CACHE = {}
+_FIG_ORDER = []
+_FIG_CACHE_LOCK = threading.Lock()
+_FIG_KEY_LOCKS = {}
+_FIG_CACHE_MAX = 40
+
+
+def _front_fig(sid, size, clip_outline=None):
+    """Кэшированный передний силуэт (Figure). get_front_figure зависит только от size+clip ->
+    общий для всех шагов. НЕ мутировать fig.contour_pt у общего объекта (front_preview делает
+    copy.copy перед резом). Лок на ключ -> параллельные/последовательные шаги ждут ОДИН расчёт."""
+    d = _sdir(sid)
+    key = (sid, str(size), None if clip_outline is None else bool(clip_outline))
+    hit = _FIG_CACHE.get(key)
+    if hit is not None:
+        return hit
+    with _FIG_CACHE_LOCK:
+        lk = _FIG_KEY_LOCKS.setdefault(key, threading.Lock())
+    with lk:                                                           # один расчёт на ключ
+        hit = _FIG_CACHE.get(key)
+        if hit is not None:
+            return hit
+        from sides import get_front_figure
+        cfg = _base_cfg(size); cfg["arm_cut"] = "none"
+        _apply_clip_outline(cfg, clip_outline)
+        page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
+        fig = get_front_figure(page, cfg)
+        with _FIG_CACHE_LOCK:
+            _FIG_CACHE[key] = fig; _FIG_ORDER.append(key)
+            while len(_FIG_ORDER) > _FIG_CACHE_MAX:                    # ограничить рост кэша
+                _FIG_CACHE.pop(_FIG_ORDER.pop(0), None)
+        return fig
+
+
+def _warm_front_fig(sid, size="2700", clip_outline=None):
+    """Прогреть силуэт в ФОНЕ сразу после загрузки -> к шагу выбора точек он уже посчитан,
+    кандидаты возвращаются мгновенно (а не висят ~80с на тяжёлом макете)."""
+    threading.Thread(target=lambda: _front_fig_safe(sid, size, clip_outline), daemon=True).start()
+
+
+def _front_fig_safe(sid, size, clip_outline=None):
+    try:
+        _front_fig(sid, size, clip_outline)
+    except Exception:
+        pass
+
+
 def _apply_details(cfg, details):
     """Вшивные детали (ложка и пр.) из UI -> manual_details. details=[{blade:[[x,y],[x,y]],
     width?:[[x,y],[x,y]], hole_dy?}] в PT (свободные клики). f = середина линии реза."""
@@ -281,8 +332,7 @@ def _fill_tips(d, size, arms, clip_outline=None):
     from arm import detect_armpits
     cfg = _base_cfg(size); cfg["arm_cut"] = "armpit"; cfg["expected_arms"] = len(arms)
     _apply_clip_outline(cfg, clip_outline)
-    page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
-    fig = get_front_figure(page, cfg)
+    fig = _front_fig(os.path.basename(d), size, clip_outline)         # кэш силуэта (ускорение тяжёлых макетов)
     try:
         det = detect_armpits(fig.contour_pt, cfg)
     except Exception:
@@ -329,6 +379,7 @@ def upload():
     meta["name"] = f.filename
     json.dump(meta, open(os.path.join(d, "meta.json"), "w"))
     _save_library(sid, pdf_path, os.path.join(d, "page.png"), f.filename)   # в базу макетов
+    _warm_front_fig(sid)                                              # фоновый прогрев силуэта (тяжёлые макеты)
     return jsonify(**meta)
 
 
@@ -404,6 +455,7 @@ def library_use():
     meta = _render_page_png(pdf_path, os.path.join(d, "page.png"))
     meta["sid"] = sid; meta["img"] = f"/api/img/{sid}/page.png"; meta["name"] = name
     json.dump(meta, open(os.path.join(d, "meta.json"), "w"))
+    _warm_front_fig(sid)                                              # фоновый прогрев силуэта (тяжёлые макеты)
     return jsonify(**meta)
 
 
@@ -436,7 +488,7 @@ def detect():
         cfg.pop("arm_detect_v2", None)                                 # для подсказки используем контурный детект (даёт f/tip/blade)
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]
         page._cfg = cfg
-        fig = get_front_figure(page, cfg)
+        fig = _front_fig(data["sid"], size, data.get("clip_outline"))  # кэш силуэта
         arms = detect_armpits(fig.contour_pt, cfg)
         if n and len(arms) > n:                                        # оставить n самых «рукоподобных» (кожа/рукав: R>>B)
             def warmth(a):
@@ -472,8 +524,7 @@ def candidates():
         from sides import get_front_figure
         cfg = _base_cfg(size); cfg["arm_cut"] = "none"
         _apply_clip_outline(cfg, data.get("clip_outline"))
-        page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
-        fig = get_front_figure(page, cfg)
+        fig = _front_fig(data["sid"], size, data.get("clip_outline"))  # кэш силуэта (без пересчёта ~80с)
         keep = _root_candidates(fig.contour_pt, int(data.get("n", 12)))
     except Exception as e:
         return jsonify(error=f"кандидаты не найдены: {e}", pts=[]), 200
@@ -498,7 +549,7 @@ def arm_preview():
         cfg = _build_cfg(size, len(arms), False, arms, clip_outline=_co)
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]
         page._cfg = cfg
-        fig = get_front_figure(page, cfg)
+        fig = _front_fig(data["sid"], size, _co)                       # кэш силуэта
         body, cut = cut_waving_arms(page, fig.contour_pt, cfg, strict=True)
     except Exception as e:
         return jsonify(error=f"рез не удался: {e}"), 400
@@ -538,7 +589,7 @@ def front_preview():
                          spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co,
                          details=data.get("details"), shoulder_round=data.get("shoulder_round"))
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
-        fig = get_front_figure(page, cfg)                            # ЛЁГКИЙ путь: только контур переда (без боковин/днища/руки)
+        fig = copy.copy(_front_fig(data["sid"], size, _co))          # кэш силуэта; copy -> contour_pt режем на КОПИИ
         fig.contour_pt, cut = cut_waving_arms(page, fig.contour_pt, cfg, strict=False)
         if cfg.get("manual_details"):                                # перёд уже БЕЗ вшивных деталей (как без рук)
             from arm import cut_details
@@ -609,7 +660,7 @@ def detail_preview():
         cfg = _base_cfg(size); _apply_clip_outline(cfg, data.get("clip_outline"))
         _apply_details(cfg, details)
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
-        fig = get_front_figure(page, cfg)
+        fig = _front_fig(data["sid"], size, data.get("clip_outline"))  # кэш силуэта
         _body, dets = cut_details(page, fig.contour_pt, cfg, strict=True)
     except Exception as e:
         return jsonify(error=f"рез детали не удался: {e}"), 400
@@ -967,6 +1018,154 @@ model-viewer{{width:100vw;height:calc(100vh - 44px);background:#eef2f6}}</style>
 <model-viewer src="/glb/{name}?key={key}" camera-controls auto-rotate shadow-intensity="1"
  exposure="1.1" camera-orbit="0deg 80deg 4m" min-camera-orbit="auto 0deg auto" touch-action="pan-y"></model-viewer>
 </body></html>"""
+
+
+# ======================================================================================
+# ДОП-ИНСТРУМЕНТ: выкладка УЖЕ ГОТОВЫХ лекал (CDR/SVG/PDF) в печатный рулон + инструкция.
+# Ничего не строим из макета и не перерисовываем — детали копируются как есть через наш
+# export_pdf_grouped._rollpack_svg (import_arrange.py). Полезно, когда правки (напр. цвета
+# гассета) внесены прямо в готовый файл и нужно только переложить в рулон.
+# ======================================================================================
+IMPORT_JOBS = {}                                                        # sid -> {status,msg,png,svg,pdf,info}
+
+
+def _import_worker(sid, d, pdf_in, ext, srcf, gap, roll_h, inst_w):
+    """Фон: (CDR/SVG->PDF) -> import_arrange (рулон+инструкция) -> превью PNG + PDF для Corel."""
+    j = IMPORT_JOBS[sid]
+    runcap = os.path.join(ROOT, "run_capped.sh"); py = os.path.join(ROOT, "venv/bin/python")
+    try:
+        if ext != ".pdf":
+            j["msg"] = "конвертирую в PDF…"
+            r = subprocess.run(["inkscape", srcf, "--export-type=pdf", "--export-filename=" + pdf_in],
+                               capture_output=True, text=True, timeout=300)
+            if not os.path.isfile(pdf_in):
+                j.update(status="error", msg="не удалось конвертировать в PDF:\n" + (r.stderr or "")[-600:]); return
+        out_svg = os.path.join(d, "roll.svg")
+        j["msg"] = "раскладываю детали в рулон…"
+        cmd = [runcap, py, os.path.join(ROOT, "import_arrange.py"), pdf_in, "-o", out_svg,
+               "--gap", str(gap), "--roll-h", str(roll_h), "--inst-w", str(inst_w)]
+        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=900)
+        if r.returncode != 0 or not os.path.isfile(out_svg):
+            j.update(status="error", msg="ошибка выкладки:\n" + (r.stderr or r.stdout)[-1200:]); return
+        j["info"] = (r.stdout or "").strip().splitlines()[-1] if r.stdout else ""
+        j["svg"] = f"/api/img/{sid}/roll.svg"
+        out_png = os.path.join(d, "roll.png"); out_pdf = os.path.join(d, "roll.pdf")
+        j["msg"] = "рендерю превью…"
+        subprocess.run(["inkscape", out_svg, "--export-type=png", "--export-filename=" + out_png,
+                        "--export-width=2400"], capture_output=True, text=True, timeout=600)
+        if os.path.isfile(out_png):
+            j["png"] = f"/api/img/{sid}/roll.png"
+        j["msg"] = "готовлю PDF для Corel…"
+        rp = subprocess.run(["inkscape", out_svg, "--export-type=pdf", "--export-filename=" + out_pdf],
+                            capture_output=True, text=True, timeout=600)
+        if os.path.isfile(out_pdf) and os.path.getsize(out_pdf) > 0:
+            j["pdf"] = f"/api/img/{sid}/roll.pdf"
+        j.update(status="done", msg=j.get("info") or "готово")
+    except subprocess.TimeoutExpired:
+        j.update(status="error", msg="таймаут обработки")
+    except Exception as e:
+        j.update(status="error", msg=f"исключение: {e}")
+
+
+@app.route("/api/import_arrange", methods=["POST"])
+def api_import_arrange():
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify(error="нужен файл CDR/SVG/PDF"), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in (".pdf", ".svg", ".cdr"):
+        return jsonify(error=f"формат не поддержан: {ext} (нужен CDR/SVG/PDF)"), 400
+    gap = float(request.form.get("gap", 20) or 20)
+    roll_h = float(request.form.get("roll_h", 1440) or 1440)
+    inst_w = float(request.form.get("inst_w", 300) or 300)
+    sid = uuid.uuid4().hex[:12]; d = os.path.join(SESS, sid); os.makedirs(d, exist_ok=True)
+    srcf = os.path.join(d, "import" + ext); f.save(srcf)
+    pdf_in = srcf if ext == ".pdf" else os.path.join(d, "import.pdf")
+    IMPORT_JOBS[sid] = {"status": "running", "msg": "в обработке…", "info": "",
+                        "png": None, "svg": None, "pdf": None}
+    threading.Thread(target=_import_worker,
+                     args=(sid, d, pdf_in, ext, srcf, gap, roll_h, inst_w), daemon=True).start()
+    return jsonify(sid=sid, status="running")
+
+
+@app.route("/api/import_status/<sid>")
+def api_import_status(sid):
+    j = IMPORT_JOBS.get(sid)
+    if not j:
+        return jsonify(error="нет такой задачи"), 404
+    return jsonify(sid=sid, **j)
+
+
+@app.route("/import")
+def import_page():
+    key = request.args.get("key") or request.cookies.get("dash_key") or ""
+    return f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Выкладка готовых лекал</title>
+<style>
+body{{margin:0;background:#12151a;color:#dde;font-family:sans-serif;padding:18px}}
+h1{{font-size:20px;margin:0 0 4px}} .sub{{color:#9aa;font-size:13px;margin-bottom:16px;max-width:820px;line-height:1.5}}
+.card{{background:#1b1f27;border:1px solid #2a2f3a;border-radius:10px;padding:16px;max-width:980px;margin-bottom:16px}}
+label{{font-size:13px;color:#bcd;margin-right:6px}} input[type=number]{{width:72px;background:#0e1116;color:#dde;border:1px solid #333;border-radius:6px;padding:5px}}
+.row{{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin:10px 0}}
+button{{background:#2d6cdf;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:14px;cursor:pointer}}
+button:disabled{{opacity:.5;cursor:default}} a.dl{{color:#9cf;margin-right:16px;font-size:14px}}
+#status{{font-size:13px;color:#9aa;margin-top:10px;white-space:pre-wrap}}
+#prev{{max-width:100%;border:1px solid #2a2f3a;border-radius:8px;margin-top:12px;background:#fff}}
+.top a{{color:#9cf;text-decoration:none;font-size:13px}}
+</style></head><body>
+<div class="top"><a href="/?key={key}">← на главную</a></div>
+<h1>Выкладка готовых лекал в рулон</h1>
+<div class="sub">Загрузите УЖЕ ГОТОВУЮ раскладку (CDR / SVG / PDF). Инструмент НЕ строит фигуру заново и
+НЕ перерисовывает детали — берёт готовые лекала как есть (вектор+текстура) и раскладывает их в
+печатный рулон нашим пайплайном (<code>_rollpack_svg</code>: плотная укладка по форме + копия
+трансформом + проверка полноты), добавляя инструкцию. Удобно, когда правки (например, цвета
+гассета) внесены прямо в файл и нужно только переложить в рулон.</div>
+<div class="card">
+  <div class="row"><input type="file" id="file" accept=".cdr,.svg,.pdf"></div>
+  <div class="row">
+    <span><label>Высота рулона, мм</label><input type="number" id="roll_h" value="1440"></span>
+    <span><label>Зазор, мм</label><input type="number" id="gap" value="20"></span>
+    <span><label>Инструкция, мм</label><input type="number" id="inst_w" value="300"></span>
+    <button id="go">Разложить</button>
+  </div>
+  <div id="status"></div>
+  <div id="links"></div>
+</div>
+<img id="prev" style="display:none">
+<script>
+const key="{key}";
+const $=id=>document.getElementById(id);
+$("go").onclick=async()=>{{
+  const f=$("file").files[0];
+  if(!f){{$("status").textContent="выберите файл";return;}}
+  $("go").disabled=true; $("status").textContent="загружаю и раскладываю… (может занять до пары минут)";
+  $("prev").style.display="none"; $("links").innerHTML="";
+  const fd=new FormData();
+  fd.append("file",f); fd.append("gap",$("gap").value);
+  fd.append("roll_h",$("roll_h").value); fd.append("inst_w",$("inst_w").value);
+  try{{
+    const res=await fetch("/api/import_arrange?key="+key,{{method:"POST",body:fd}});
+    const j=await res.json();
+    if(!res.ok){{$("status").textContent="Ошибка:\\n"+(j.error||res.status);$("go").disabled=false;return;}}
+    const sid=j.sid;
+    while(true){{
+      await new Promise(r=>setTimeout(r,2500));
+      const s=await (await fetch("/api/import_status/"+sid+"?key="+key)).json();
+      $("status").textContent=s.msg||s.status;
+      if(s.status==="done"){{
+        let html="";
+        if(s.pdf)html+=`<a class="dl" href="${{s.pdf}}?key=${{key}}" download>↓ PDF (Corel)</a>`;
+        if(s.svg)html+=`<a class="dl" href="${{s.svg}}?key=${{key}}" download>↓ SVG</a>`;
+        $("links").innerHTML=html;
+        if(s.png){{$("prev").src=s.png+"?key="+key+"&t="+Date.now();$("prev").style.display="block";}}
+        break;
+      }}
+      if(s.status==="error"){{$("status").textContent="Ошибка:\\n"+s.msg;break;}}
+    }}
+  }}catch(e){{$("status").textContent="сбой: "+e;}}
+  $("go").disabled=false;
+}};
+</script></body></html>"""
 
 
 if __name__ == "__main__":
