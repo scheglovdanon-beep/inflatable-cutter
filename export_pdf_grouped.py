@@ -746,7 +746,7 @@ def main():
                  bb[1] + (y - fr_bbox[1]) / fh2 * (bb[3] - bb[1])) for x, y in src]
     for hp in lay.get("hand_pieces", []):
         src = hp.get("src")
-        if src is not None and _hand_back and hp.get("name") == "правая сторона":
+        if src is not None and _hand_back and (hp.get("name") or "").startswith("правая сторона"):
             src = _src_to_back(src); hp = {**hp, "src": src}        # зад кисти = текстура с заднего тела
         dds = _dds_for_src(src) if src is not None else arm_dds
         pieces.append((f"kist_{hp['name']}", _piece_svg(page, hp, "hand", dds, f_mm, lw, nextid(), hand_fill=hand_fill, colors_top=colors_top)))
@@ -757,6 +757,9 @@ def main():
     # иначе разбросанная колонка-запаска как единый блок не влезает в 1440). Позиции в раскладке те же.
     spare = lay.get("spare_arm", [])
     for i, p in enumerate(spare):
+        if _hand_back and p.get("kind") == "hand" and p.get("src") is not None \
+                and (p.get("name") or "").startswith("правая сторона"):
+            p = {**p, "src": _src_to_back(p["src"])}                # зад кисти запаски — тоже с заднего тела
         body = _piece_svg(page, p, p["kind"], arm_dds, f_mm, lw, nextid(), arm_fill, hand_fill, colors_top=colors_top)
         pieces.append((f"zapasnaya_{i}", body))
 
