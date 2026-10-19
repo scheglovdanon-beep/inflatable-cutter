@@ -608,16 +608,31 @@ def main():
             res.append(tuple(arr[i] + nrm * d))
         return res
 
-    # Цветные линии ВШИВА (цвет-ключ, где перёд сшивается с боковинами) — под флагом seam_color_lines
-    # (деф. True). Пока отключено в дашборде. Маркер «рука здесь» (arm_cut_marks) оставляем всегда.
+    # Цветные линии ВШИВА (цвет-ключ, где перёд сшивается с боковинами). Два режима:
+    #   seam_color_lines (деф. True) — ПО ДЕТАЛЯМ: одна дуга-ключ на боковину (цвет _palette).
+    #   seam_color_bands (деф. False) — ПО ЦВЕТАМ: дуга на КАЖДУЮ цветовую зону боковины в ЕЁ цвете
+    #     (куда этот цвет прилегает на переде/заде). Зад — зеркало front_arcs (ниже).
+    # Дуги лежат В КОЛЬЦЕ ПРИПУСКА (не заходят за контур). Маркер «рука здесь» оставляем всегда.
     seam_lines = cfg.get("seam_color_lines", True)
+    seam_bands = cfg.get("seam_color_bands", False)
     tf_f = _tex_tf(contour_mm, lay["front"], f_mm); gl = g["gusset_line"]
+
+    def _arc_on(a_from, a_to):                                        # точки дуги gusset_line (кадр переда)
+        n = max(2, int(abs(a_to - a_from) / 6))
+        return [tf_f(*(np.asarray(gl.interpolate(a_from + (a_to - a_from) * k / n).coords[0]) / f_mm))
+                for k in range(n + 1)]
+    band_keys = {}                                                    # (strip_i, band_j) -> различимый ключ-цвет зоны
     front_arcs = []
-    if seam_lines:
+    if seam_bands:                                                    # ПО ЦВЕТАМ: каждой ЗОНЕ свой ключ, дуга на переде
+        _ctr = 0
+        for s in lay.get("strips", []):
+            a0, a1 = s.get("arc0", 0.0), s.get("arc1", 0.0); span = (a1 - a0) or 1.0
+            for j, (f0, f1, _rgb) in enumerate(s.get("bands", []) or []):
+                band_keys[(s["i"], j)] = HEX(_palette(_ctr)); _ctr += 1
+                front_arcs.append((band_keys[(s["i"], j)], _arc_on(a0 + f0 * span, a0 + f1 * span)))
+    elif seam_lines:                                                  # ПО ДЕТАЛЯМ: одна дуга-ключ на боковину
         for s in g["segments"]:
-            a0, a1 = s["arc0"], s["arc1"]; n = max(2, int(abs(a1 - a0) / 6))
-            pts = [tf_f(*(np.asarray(gl.interpolate(a0 + (a1 - a0) * k / n).coords[0]) / f_mm)) for k in range(n + 1)]
-            front_arcs.append((HEX(_palette(s["i"])), pts))
+            front_arcs.append((HEX(_palette(s["i"])), _arc_on(s["arc0"], s["arc1"])))
     for seg in lay.get("arm_cut_marks", []):                          # ЛИНИЯ РЕЗА ПЛЕЧА (где пристыковывается рука)
         front_arcs.append(("#cc5500", list(seg)))                     # dull-оранжевый = «рука здесь»
 
@@ -717,6 +732,21 @@ def main():
             res.append(tuple(arr[i] + nrm * d))
         return res
 
+    def _edge_sub(edge, f0, f1):
+        """Под-полилиния ребра между долями длины [f0,f1] (для ключа цветовой зоны на ребре)."""
+        arr = np.asarray(edge, float)
+        if len(arr) < 2:
+            return list(edge)
+        seg = np.hypot(*np.diff(arr, axis=0).T); L = seg.sum() or 1.0
+        cum = np.concatenate([[0.0], np.cumsum(seg)]) / L
+
+        def at(f):
+            k = min(max(int(np.searchsorted(cum, f)) - 1, 0), len(arr) - 2)
+            t = (f - cum[k]) / max(cum[k + 1] - cum[k], 1e-9)
+            return tuple(arr[k] + t * (arr[k + 1] - arr[k]))
+        pts = [at(f0)] + [tuple(arr[k]) for k in range(len(arr)) if f0 < cum[k] < f1] + [at(f1)]
+        return pts
+
     for s in lay["strips"]:
         tagged = [("colors", _poly(q, fill=HEX(c), stroke="none", sw=0)) for q, c in strip_band_quads(s)]
         # цветной ключ: тот же цвет, что дуга переда (_palette[i]), вдоль ОБОИХ длинных рёбер
@@ -730,7 +760,16 @@ def main():
         else:
             le, re = _edges_top_down(list(s["poly"]), s.get("waist") is not None)
         keycol = HEX(_palette(s["i"]))
-        if seam_lines:                                                 # цвет-ключ вдоль рёбер — под флагом seam_color_lines
+        if seam_bands:                                                 # ПО ЦВЕТАМ: ключ зоны на под-участке ОБОИХ рёбер
+            for edge in (le, re):
+                for j, (f0, f1, _rgb) in enumerate(s.get("bands", []) or []):
+                    sub = _edge_sub(edge, f0, f1)
+                    if len(sub) < 2:
+                        continue
+                    d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(sub, cen, off))
+                    tagged.append(("seamlines", f'<path d="{d}" fill="none" stroke="{band_keys.get((s["i"], j), keycol)}" '
+                                   f'stroke-width="{sw_seam}" stroke-linecap="round"/>'))
+        elif seam_lines:                                               # ПО ДЕТАЛЯМ: один ключ вдоль рёбер (seam_color_lines)
             for edge in (le, re):
                 d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(edge, cen, off))
                 tagged.append(("seamlines", f'<path d="{d}" fill="none" stroke="{keycol}" stroke-width="{sw_seam}" stroke-linecap="round"/>'))
