@@ -71,20 +71,28 @@ def build_base_v2(g, cfg):
 
 def build_base(g, cfg):
     if cfg.get("base_v2"):
-        return build_base_v2(g, cfg)
-    fan = cfg["fan_diameter_mm"]
-    leg_h = cfg["leg_height_mm"]
-    # лекало-днище: длина = нижняя кромка переда/зада (стык с ними),
-    # ширина = толщина боковины внизу (стык с боковинами). Размеры ВЫВЕДЕНЫ из деталей.
-    length = g["bottom_len"]                       # шов с передом и задом
-    width = cfg.get("base_width_mm", fan)          # шов с боковинами (= толщине низа); 650 для 4200
-    dnishe = Polygon([(0, 0), (length, 0), (length, width), (0, width)])
-    c = (length / 2.0, width / 2.0)                # отверстие вентилятора по центру (Ø fan, 460)
-    return {
-        "dnishe": dnishe, "fan_c": c, "fan_d": fan,
-        "bottom_len": length, "width": width,
-        "leg_w": math.pi * fan, "leg_h": leg_h,
-    }
+        b = build_base_v2(g, cfg)
+    else:
+        fan = cfg["fan_diameter_mm"]
+        leg_h = cfg["leg_height_mm"]
+        # лекало-днище: длина = нижняя кромка переда/зада (стык с ними),
+        # ширина = толщина боковины внизу (стык с боковинами). Размеры ВЫВЕДЕНЫ из деталей.
+        length = g["bottom_len"]                       # шов с передом и задом
+        width = cfg.get("base_width_mm", fan)          # шов с боковинами (= толщине низа); 650 для 4200
+        dnishe = Polygon([(0, 0), (length, 0), (length, width), (0, width)])
+        c = (length / 2.0, width / 2.0)                # отверстие вентилятора по центру (Ø fan, 460)
+        b = {
+            "dnishe": dnishe, "fan_c": c, "fan_d": fan,
+            "bottom_len": length, "width": width,
+            "leg_w": math.pi * fan, "leg_h": leg_h,
+        }
+    # НОЖКА-КОНСТАНТА: готовая деталь-баннер фиксированного размера на ВСЕХ фигурах (leg_const).
+    # Заменяет старую ножку π·Ø×leg_height. Размер = чёрному прямоугольнику готовой детали (шов).
+    if cfg.get("leg_const", True):
+        b["leg_w"] = float(cfg.get("leg_const_w_mm", 1520.0))
+        b["leg_h"] = float(cfg.get("leg_const_h_mm", 150.0))
+        b["leg_const"] = True
+    return b
 
 
 def render_base(b, out_png, target_px=1100, margin=60, gap=120):

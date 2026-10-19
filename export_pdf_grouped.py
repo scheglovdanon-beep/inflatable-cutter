@@ -43,6 +43,31 @@ def _filled(pts, fill, sw, colors_top, stroke="#000"):
     return [("contour", _poly(pts, fill=fill, stroke=stroke, sw=sw))]
 
 
+# ---------- НОЖКА-КОНСТАНТА: ГОТОВАЯ деталь (вектор как есть) вместо старого прямоугольника ----------
+# Деталь из examples/leg_const.svg (1540×170мм: чёрный-сшив 1520×150 + рамка-припуск 10мм) копируется
+# как ВЕКТОР (ничего не перерисовываем/не растрируем): углы чёрного прямоугольника детали отображаем
+# на углы нашей ножки (с учётом поворота в раскладке), контент pt -> мм (scale PT2MM).
+_LEG_CONST_SVG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "leg_const.svg")
+_LEG_CONST_INNER = None
+
+
+def _leg_const_svg(leg_pts):
+    """Вставить готовую деталь-ножку (вектор) на место ножки leg_pts (сшив 1520×150). Возвращает
+    [svg]. Чёрный прямоугольник детали (рамка 10мм -> углы (10,10)..(1530,160) в мм контента)
+    совмещаем с углами ножки; рамка-припуск выходит наружу на 10мм (как наш seam)."""
+    global _LEG_CONST_INNER
+    if _LEG_CONST_INNER is None:
+        s = open(_LEG_CONST_SVG, encoding="utf-8").read()
+        _LEG_CONST_INNER = s[s.find(">", s.find("<svg")) + 1: s.rfind("</svg>")]
+    src = np.array([[10.0, 10.0], [1530.0, 10.0], [10.0, 160.0]])     # TL,TR,BL чёрного в контент-мм
+    dst = np.array([leg_pts[0], leg_pts[1], leg_pts[3]], float)       # соответств. углы ножки
+    Mx = np.hstack([src, np.ones((3, 1))])
+    ax = np.linalg.solve(Mx, dst[:, 0]); ay = np.linalg.solve(Mx, dst[:, 1])
+    PT2MM = 25.4 / 72.0
+    return [f'<g transform="matrix({ax[0]:.6f},{ay[0]:.6f},{ax[1]:.6f},{ay[1]:.6f},{ax[2]:.3f},{ay[2]:.3f})">'
+            f'<g transform="scale({PT2MM:.6f})">{_LEG_CONST_INNER}</g></g>']
+
+
 def _bez(p0, p1, p2, p3, n=6):
     """Точки кубической кривой Безье (сэмплинг для перевода текстуры в полигоны)."""
     out = []
@@ -779,9 +804,12 @@ def main():
         else:
             lx, ly, lwd, lh = b["leg"]
             leg_pts = [(lx, ly), (lx + lwd, ly), (lx + lwd, ly + lh), (lx, ly + lh)]
-        lb = _filled(leg_pts, base_fill, lw, colors_top)
-        if b.get("leg_seam"):
-            lb.append(("seam", _poly(list(b["leg_seam"].exterior.coords), stroke="#000000", sw=lw)))
+        if cfg.get("leg_const", True) and os.path.isfile(_LEG_CONST_SVG):   # ГОТОВАЯ деталь-ножка (вектор как есть)
+            lb = [("colors", el) for el in _leg_const_svg(leg_pts[:4])]     # деталь уже содержит контур+припуск
+        else:
+            lb = _filled(leg_pts, base_fill, lw, colors_top)
+            if b.get("leg_seam"):
+                lb.append(("seam", _poly(list(b["leg_seam"].exterior.coords), stroke="#000000", sw=lw)))
         pieces.append(("nozhka", _emit_layers(lb, colors_top)))
         for ti, tp in enumerate(b.get("transition", [])):               # переход-воронка Ø300->Ø460 (4 части)
             pieces.append((f"perehod_{ti}", _emit_layers(_filled(list(tp.exterior.coords), base_fill, lw, colors_top), colors_top)))
@@ -813,6 +841,8 @@ def main():
 
     # сборка: каждая запись pieces -> отдельный Form XObject (= группа в Corel)
     hdr = (f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+           f'xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" '
+           f'xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" '
            f'width="{W:.2f}mm" height="{H:.2f}mm" viewBox="0 0 {W:.2f} {H:.2f}">')
 
     if args.out.lower().endswith(".svg"):                             # SVG: каждая деталь = <g id=..> (НАСТОЯЩАЯ
