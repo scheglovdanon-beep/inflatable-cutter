@@ -20,6 +20,14 @@ def _circle(cx, cy, r, stroke, sw):
     return f'<circle cx="{cx:.3f}" cy="{cy:.3f}" r="{r:.3f}" fill="none" stroke="{stroke}" stroke-width="{sw:.3f}"/>'
 
 
+def _palette_vivid(i):
+    """МАКСИМАЛЬНО ЯРКИЙ различимый ключ-цвет зоны (для seam_color_bands) — в отличие от тусклого
+    _palette: полная насыщенность и яркость, цвета по золотому сечению (не повторяются)."""
+    import colorsys
+    r, g, b = colorsys.hsv_to_rgb((i * 0.61803398875) % 1.0, 1.0, 1.0)
+    return (int(r * 255), int(g * 255), int(b * 255))
+
+
 # ---------- ПОРЯДОК СЛОЁВ ДЕТАЛИ: цвета СВЕРХУ (чтобы правки цветов кликались первыми в Corel) ----------
 # Сзади -> вперёд: припуск(+10) -> цветные линии вшива -> контур реза -> ЦВЕТА/текстура(верх).
 _LAYER_Z = {"seam": 0, "seamlines": 1, "contour": 2, "colors": 3}
@@ -628,7 +636,7 @@ def main():
         for s in lay.get("strips", []):
             a0, a1 = s.get("arc0", 0.0), s.get("arc1", 0.0); span = (a1 - a0) or 1.0
             for j, (f0, f1, _rgb) in enumerate(s.get("bands", []) or []):
-                band_keys[(s["i"], j)] = HEX(_palette(_ctr)); _ctr += 1
+                band_keys[(s["i"], j)] = HEX(_palette_vivid(_ctr)); _ctr += 1
                 front_arcs.append((band_keys[(s["i"], j)], _arc_on(a0 + f0 * span, a0 + f1 * span)))
     elif seam_lines:                                                  # ПО ДЕТАЛЯМ: одна дуга-ключ на боковину
         for s in g["segments"]:
