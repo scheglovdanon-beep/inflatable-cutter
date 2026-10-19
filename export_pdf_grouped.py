@@ -732,9 +732,23 @@ def main():
                         f'stroke-width="{sw_seam}" stroke-linecap="round"/>'))
         pieces.append((f"bokovina_{s['i']}", _emit_layers(tagged, colors_top)))
 
-    # КИСТЬ и РУКА — каждая деталь своей группой (текстура по bbox src этого куска)
+    # КИСТЬ и РУКА — каждая деталь своей группой (текстура по bbox src этого куска).
+    # ЗАДНЯЯ грань кисти («правая сторона») берёт ТЕКСТУРУ с ЗАДНЕГО тела фигуры (контур тот же,
+    # меняется только источник текстуры) — иначе ладонь выходит с ОБЕИХ сторон, а на заде должна
+    # быть ТЫЛЬНАЯ сторона руки. src переда отражаем в положение заднего тела (bbox переда->bbox
+    # зада на странице, с X-зеркалом — как mir для панели зада). Флаг hand_back_from_back (деф.True).
+    _bk = lay.get("back")
+    _hand_back = cfg.get("hand_back_from_back", True) and _bk is not None
+    def _src_to_back(src):
+        bb = _bk["cut_pt"].bounds if _bk.get("cut_pt") else _bk["src"].bounds
+        fw2 = (fr_bbox[2] - fr_bbox[0]) or 1.0; fh2 = (fr_bbox[3] - fr_bbox[1]) or 1.0
+        return [(bb[0] + (1.0 - (x - fr_bbox[0]) / fw2) * (bb[2] - bb[0]),
+                 bb[1] + (y - fr_bbox[1]) / fh2 * (bb[3] - bb[1])) for x, y in src]
     for hp in lay.get("hand_pieces", []):
-        dds = _dds_for_src(hp["src"]) if hp.get("src") is not None else arm_dds
+        src = hp.get("src")
+        if src is not None and _hand_back and hp.get("name") == "правая сторона":
+            src = _src_to_back(src); hp = {**hp, "src": src}        # зад кисти = текстура с заднего тела
+        dds = _dds_for_src(src) if src is not None else arm_dds
         pieces.append((f"kist_{hp['name']}", _piece_svg(page, hp, "hand", dds, f_mm, lw, nextid(), hand_fill=hand_fill, colors_top=colors_top)))
     for apc in lay.get("arm_pieces", []):
         pieces.append((f"ruka_{apc.get('name','?')}", _piece_svg(page, apc, "arm", arm_dds, f_mm, lw, nextid(), arm_fill, colors_top=colors_top)))
