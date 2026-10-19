@@ -913,20 +913,26 @@ def _top_edge(forearm_pts, wrist, ang_thr=22.0, simp_mm=4.0):
 
 
 def build_hand(hand_pts, forearm_pts, wrist, scale, gap_mm=40.0,
-               fore_top_mm=None, fore_bot_mm=None):
+               fore_top_mm=None, fore_bot_mm=None, full_arc=True):
     """Деталь кисти «печенье»: перёд + зеркальный зад + боковина-прямоугольник.
     Все замеры в ОДНОМ масштабе (вырезанные детали руки), затем × scale → мм.
     Ширина боковины W = (верхнее_ребро_предплечья − 2·ровное_ребро_кисти)/2;
-    высота H = длина кривой кромки кисти (периметр без линии среза).
+    высота H = длина КРИВОЙ кромки кисти = дуга B..кончик..T (без линии среза).
     Открытый край кисти 2·straight + 2·W == верхнее ребро предплечья (инвариант).
+
+    hand_pts (из cut_arm) — это УЖЕ дуга B..кончик..T БЕЗ хорды реза, поэтому высота гассета
+    H = _plen(hand_pts) (full_arc=True). Раньше ошибочно вычиталась ещё и хорда -> гассет был
+    КОРОЧЕ дуги на длину среза и шов по дуге не сходился. full_arc=False — старое поведение.
 
     fore_top_mm/fore_bot_mm — ЯВНЫЕ рёбра предплечья в мм (для стыковки с ЭТАЛОННЫМ
     предплечьем, у которого верхнее ребро фиксировано). Если заданы — _top_edge не
     вызывается. Если кисть шире этого ребра (2·straight ≥ 0.9·fore_top) — кисть
     ПРОПОРЦИОНАЛЬНО ужимается (hand_scale), чтобы боковина W была положительной и шов сошёлся."""
     B, T = np.asarray(wrist[0], float), np.asarray(wrist[1], float)
-    straight = float(np.hypot(*(B - T))) * scale                        # ровное ребро кисти
-    curved = (_plen(hand_pts) - float(np.hypot(*(hand_pts[0] - hand_pts[-1])))) * scale
+    straight = float(np.hypot(*(B - T))) * scale                        # ровное ребро кисти (= срез)
+    # H гассета = длина дуги кисти. hand_pts уже БЕЗ хорды реза -> вычитать её НЕ надо (это и был баг).
+    chord = 0.0 if full_arc else float(np.hypot(*(hand_pts[0] - hand_pts[-1])))
+    curved = (_plen(hand_pts) - chord) * scale
     if fore_top_mm is not None:                                         # стыковка с ЭТАЛОННЫМ предплечьем
         fore_top = float(fore_top_mm)
         fore_bot = float(fore_bot_mm) if fore_bot_mm is not None else fore_top
@@ -1274,7 +1280,8 @@ def build_arm_from_poly(page, arm_pt, tip, scale, cfg, armpit=None, wrist=None, 
 
     # 3) КИСТЬ, состыкованная с эталонным предплечьем: opening == predplechie.edge_top
     hand = build_hand(hand_pts, fore_pts, wrist, scale,
-                      fore_top_mm=fore_top, fore_bot_mm=fore_bot)
+                      fore_top_mm=fore_top, fore_bot_mm=fore_bot,
+                      full_arc=cfg.get("hand_gusset_full_arc", True))
 
     # 4) ЦВЕТ ЗОН: детект локтя -> цвет предплечья (кожа) и плеча (рукав) с РЕАЛЬНОЙ руки.
     #    predplechie = цвет предплечья; plecho и baza(полоска крепления) = цвет плеча.
