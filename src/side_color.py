@@ -432,6 +432,95 @@ def design_palette(page, front_drawings_fn, contour_mm, fig, cfg):
     return merged or pal
 
 
+def detect_wrap_rings(page, contour_mm, fig, cfg):
+    """R2: обтекающие объекты-КОЛЬЦА (пояс и т.п.) — насыщенные АКЦЕНТНЫЕ заливки, идущие
+    по ВСЕЙ ширине фигуры (суммарно широкие + тонкие по высоте). Их надо провести НЕПРЕРЫВНОЙ
+    полосой на ОДНОЙ высоте через все боковины (целостность кольца). Возвращает список
+    {'color':(r,g,b),'y0':мм,'y1':мм} в той же мм-системе, что и gusset_line/контур."""
+    import colorsys
+    from shapely.geometry import LineString
+    f_mm = fig.s * PT2MM
+    bx0, by0, bx1, by1 = contour_mm.bounds
+    fw, fh = bx1 - bx0, by1 - by0
+    etol = cfg.get("wrap_ring_edge_tol_frac", 0.12) * fw                  # «край-в-край»: допуск до боковой кромки
+
+    def spans_edges(x0, x1, cy):                                          # заливка достаёт до ОБЕИХ кромок силуэта на высоте cy
+        try:
+            inter = contour_mm.intersection(LineString([(bx0 - 10, cy), (bx1 + 10, cy)]))
+        except Exception:
+            return False
+        if inter.is_empty:
+            return False
+        lx, _, rx, _ = inter.bounds
+        return x0 <= lx + etol and x1 >= rx - etol
+    wmin = cfg.get("wrap_ring_min_width_frac", 0.55) * fw                 # кольцо суммарно широкое
+    hmax = cfg.get("wrap_ring_max_height_frac", 0.08) * fh                # и тонкое по высоте
+    aspect = cfg.get("wrap_ring_min_aspect", 4.0)                         # каждая заливка — горизонтально вытянутая
+    tmin = cfg.get("wrap_ring_min_thick_mm", 15.0)                        # не тоньше (тонкое = обводка, не кольцо)
+    sat_min = cfg.get("wrap_ring_sat_min", 0.35)
+    val_min = cfg.get("wrap_ring_val_min", 0.35)
+    qd = 24
+    buckets = {}                                                          # бакет по квант.цвету -> тонкие широкие заливки
+    for dd in page.get_drawings():
+        f = dd.get("fill")
+        if f is None:
+            continue
+        c = tuple(int(255 * v) for v in f)
+        _h, sv, vv = colorsys.rgb_to_hsv(*[x / 255.0 for x in c])
+        if sv < sat_min or vv < val_min:
+            continue
+        r = dd["rect"]
+        y0, y1 = r.y0 * f_mm, r.y1 * f_mm
+        x0, x1 = r.x0 * f_mm, r.x1 * f_mm
+        w, hgt = x1 - x0, y1 - y0
+        if not (0 < hgt <= hmax and w >= aspect * hgt):                   # горизонтально вытянутая и тонкая
+            continue
+        if not (by0 - 5 <= (y0 + y1) / 2.0 <= by1 + 5):
+            continue
+        buckets.setdefault((c[0] // qd, c[1] // qd, c[2] // qd), []).append(
+            {"c": c, "y0": y0, "y1": y1, "x0": x0, "x1": x1})
+    rings = []
+    for parts in buckets.values():                                       # внутри цвета — слить по близкой высоте
+        parts.sort(key=lambda rr: (rr["y0"] + rr["y1"]) / 2.0)
+        groups = []
+        for rr in parts:
+            cy = (rr["y0"] + rr["y1"]) / 2.0
+            if groups and cy - groups[-1]["cy"] < hmax:
+                gq = groups[-1]
+                gq["y0"] = min(gq["y0"], rr["y0"]); gq["y1"] = max(gq["y1"], rr["y1"])
+                gq["x0"] = min(gq["x0"], rr["x0"]); gq["x1"] = max(gq["x1"], rr["x1"])
+                gq["cy"] = (gq["y0"] + gq["y1"]) / 2.0
+            else:
+                groups.append({**rr, "cy": cy})
+        e2e = cfg.get("wrap_ring_edge_to_edge", False)                   # строгий фильтр край-в-край (деф. выкл)
+        for gq in groups:
+            if (gq["x1"] - gq["x0"]) >= wmin and (gq["y1"] - gq["y0"]) >= tmin and \
+               (not e2e or spans_edges(gq["x0"], gq["x1"], gq["cy"])):
+                rings.append({"color": gq["c"], "y0": gq["y0"], "y1": gq["y1"]})
+    return rings
+
+
+def _splice_band(bands, fa, fb, color):
+    """Вписать полосу color на долю [fa,fb], обрезав/подвинув перекрытые полосы (поверх R1)."""
+    out = []
+    for f0, f1, c in bands:
+        if f1 <= fa or f0 >= fb:
+            out.append((f0, f1, c)); continue
+        if f0 < fa:
+            out.append((f0, fa, c))
+        if f1 > fb:
+            out.append((fb, f1, c))
+    out.append((fa, fb, tuple(color)))
+    out.sort(key=lambda b: b[0])
+    m = []
+    for b in out:
+        if m and tuple(m[-1][2]) == tuple(b[2]) and abs(m[-1][1] - b[0]) < 1e-6:
+            m[-1] = (m[-1][0], b[1], m[-1][2])
+        else:
+            m.append(tuple(b))
+    return m
+
+
 def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
     """Залить каждую полосу цветными зонами = цвет макета на её дуге переда.
     Пишет в каждую полосу layout['strips'] список s['bands'] = [(f0,f1,(r,g,b))]."""
@@ -518,6 +607,7 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
         return (tuple(int(v) for v in last) if last is not None else fallback), False
 
     pal = design_palette(page, front_drawings_fn, contour_mm, fig, cfg) if cfg.get("gusset_palette_snap") else []
+    rings = detect_wrap_rings(page, contour_mm, fig, cfg) if cfg.get("gusset_wrap_rings") else []
     for s in layout["strips"]:
         a0, a1 = s["arc0"], s["arc1"]
         flip = s["yn0"] < s["yn1"]
@@ -551,6 +641,13 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
         maxz = int(cfg.get("gusset_max_zones", 0) or 0)                               # R1: потолок числа зон на полосу
         if maxz > 0:
             bands = _cap_zones(bands, maxz)
+        if rings:                                                                     # R2: непрерывное кольцо (пояс) на одной высоте
+            ey = [line.interpolate(a_top + (a_bot - a_top) * ((fs[k] + fs[k + 1]) / 2)).coords[0][1]
+                  for k in range(M)]                                                  # высота (мм) кромки на доле fs
+            for rg in rings:
+                ks = [k for k in range(M) if rg["y0"] <= ey[k] <= rg["y1"]]
+                if ks:                                                                # эта боковина проходит высоту кольца
+                    bands = _splice_band(bands, float(fs[min(ks)]), float(fs[max(ks) + 1]), rg["color"])
         s["bands"] = bands
 
 
