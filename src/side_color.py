@@ -363,6 +363,75 @@ def _interp(edge, f):
     return tuple(p[k] + t * (p[k + 1] - p[k]))
 
 
+def _snap_to_palette(c, pal):
+    """Ближайший цвет палитры к c (Евклид в RGB). pal пуст -> c как есть."""
+    if not pal:
+        return tuple(int(v) for v in c)
+    a = (int(c[0]), int(c[1]), int(c[2]))
+    return min(pal, key=lambda p: (a[0] - p[0]) ** 2 + (a[1] - p[1]) ** 2 + (a[2] - p[2]) ** 2)
+
+
+def _coalesce_equal(bands):
+    """Слить соседние полосы ТОЧНО одинакового цвета (после снэпа к палитре)."""
+    out = []
+    for f0, f1, c in bands:
+        if out and tuple(out[-1][2]) == tuple(c):
+            out[-1][1] = f1
+        else:
+            out.append([f0, f1, tuple(c)])
+    return [(b[0], b[1], b[2]) for b in out]
+
+
+def _cap_zones(bands, maxn):
+    """Оставить не более maxn зон: самую короткую сливаем в более длинного соседа, повторяем."""
+    if maxn <= 0 or len(bands) <= maxn:
+        return [(b[0], b[1], tuple(b[2])) for b in bands]
+    out = [list(b) for b in bands]
+    while len(out) > maxn:
+        k = min(range(len(out)), key=lambda i: out[i][1] - out[i][0])
+        neigh = [j for j in (k - 1, k + 1) if 0 <= j < len(out)]
+        j = max(neigh, key=lambda i: out[i][1] - out[i][0])
+        lo, hi = min(out[k][0], out[j][0]), max(out[k][1], out[j][1])
+        out[min(k, j)] = [lo, hi, out[j][2]]                          # цвет — у более длинного соседа
+        out.pop(max(k, j))
+    return [(b[0], b[1], tuple(b[2])) for b in out]
+
+
+def design_palette(page, front_drawings_fn, contour_mm, fig, cfg):
+    """R1: палитра ЛОГИЧЕСКИХ цветов дизайна. Квантуем пиксели ВНУТРИ силуэта (без near-чёрной
+    обводки и near-белого фона) к небольшому числу цветов (gusset_palette_max) и выкидываем
+    слишком близкие (gusset_palette_merge_dist). К этой палитре снэпятся сэмплы кромки, чтобы
+    тени/градиенты/блики ОДНОГО цвета не плодили кучу полос-оттенков. Возвращает [(r,g,b)]."""
+    import cv2
+    from PIL import Image
+    arr, bx0, by0, Z, mg = front_raster(page, front_drawings_fn)
+    H, W = arr.shape[:2]
+    f_mm = fig.s * PT2MM
+    pts = np.array([[(x / f_mm - bx0 + mg) * Z, (y / f_mm - by0 + mg) * Z]
+                    for x, y in contour_mm.exterior.coords], np.int32)
+    mask = np.zeros((H, W), np.uint8); cv2.fillPoly(mask, [pts], 1)
+    px = arr[mask > 0].reshape(-1, 3).astype(int)
+    if not len(px):
+        return []
+    s = px.sum(1)
+    dark = cfg.get("outline_dark_thr", 55)
+    white = cfg.get("gusset_palette_white_sum", 735)
+    px = px[(s >= dark) & (s <= white)]                              # без обводки и без фона
+    if len(px) < 16:
+        return []
+    n = max(2, int(cfg.get("gusset_palette_max", 8)))
+    q = Image.fromarray(px.astype(np.uint8).reshape(-1, 1, 3)).quantize(colors=n, method=Image.MEDIANCUT)
+    pal_arr = np.array(q.getpalette()[:n * 3]).reshape(-1, 3)
+    used = np.unique(np.asarray(q))
+    pal = [tuple(int(v) for v in pal_arr[i]) for i in used if i < len(pal_arr)]
+    mdist = int(cfg.get("gusset_palette_merge_dist", 40))            # слить близкие записи палитры
+    merged = []
+    for c in sorted(pal, key=lambda x: -(x[0] + x[1] + x[2])):
+        if all(max(abs(c[k] - m[k]) for k in range(3)) > mdist for m in merged):
+            merged.append(c)
+    return merged or pal
+
+
 def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
     """Залить каждую полосу цветными зонами = цвет макета на её дуге переда.
     Пишет в каждую полосу layout['strips'] список s['bands'] = [(f0,f1,(r,g,b))]."""
@@ -448,6 +517,7 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
             last = c; d += step_mm
         return (tuple(int(v) for v in last) if last is not None else fallback), False
 
+    pal = design_palette(page, front_drawings_fn, contour_mm, fig, cfg) if cfg.get("gusset_palette_snap") else []
     for s in layout["strips"]:
         a0, a1 = s["arc0"], s["arc1"]
         flip = s["yn0"] < s["yn1"]
@@ -463,12 +533,24 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
                            for j in (k - d, k + d) if 0 <= j < M and ok[j]), None)
                 if nb is not None:
                     raw_c[k] = nb
+        if pal:                                                      # R1: снэп к логической палитре дизайна
+            raw_c = [_snap_to_palette(c, pal) for c in raw_c]
         raw = [(float(fs[k]), float(fs[k + 1]), raw_c[k]) for k in range(M)]          # РЕАЛЬНЫЕ цвета кромки (без accentize)
-        vmm = cfg.get("band_value_merge_max") if cfg.get("side_color_dominant") else None  # не сливать разную яркость
-        bands = _simplify_bands(raw, fallback, cfg.get("hue_merge_deg", 20.0), vmm)    # слить соседние близкие по тону
-        bands = _merge_small_bands(bands, cfg.get("band_merge_small_frac", 0.03))     # убрать лишь совсем тонкие
+        if pal:                                                      # снэпнуто -> сливаем только ТОЧНО одинаковые соседние
+            bands = _coalesce_equal(raw)
+        else:
+            vmm = cfg.get("band_value_merge_max") if cfg.get("side_color_dominant") else None  # не сливать разную яркость
+            bands = _simplify_bands(raw, fallback, cfg.get("hue_merge_deg", 20.0), vmm)    # слить соседние близкие по тону
+        small_frac = cfg.get("band_merge_small_frac", 0.03)
+        mz = cfg.get("gusset_min_zone_mm", 0.0)                                       # R1: абсолютный минимум зоны (мм)
+        if mz > 0 and L > 0:
+            small_frac = max(small_frac, mz / L)
+        bands = _merge_small_bands(bands, small_frac)                                 # убрать тонкие
         if cfg.get("side_color_drop_dark_bands"):                                     # C: тёмные полосы -> светлый сосед
             bands = _drop_dark_bands(bands, cfg.get("side_color_dark_band_val", 140))
+        maxz = int(cfg.get("gusset_max_zones", 0) or 0)                               # R1: потолок числа зон на полосу
+        if maxz > 0:
+            bands = _cap_zones(bands, maxz)
         s["bands"] = bands
 
 
