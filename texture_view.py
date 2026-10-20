@@ -174,6 +174,11 @@ def main():
             lx, ly, lwd, lh = b["leg"]
             dr.rectangle([T(lx, ly), T(lx + lwd, ly + lh)], fill=base_col, outline=(0, 0, 0))
             dr.text((T(lx, ly)[0] + 2, T(lx, ly)[1] - 13), "NOZHKA", fill=(180, 0, 0))
+        for ti, tp in enumerate(b.get("transition", [])):              # переходы-воронки (4): рисуем ДЕТАЛЬ,
+            dr.polygon([T(x, y) for x, y in tp.exterior.coords],       # припуск 10мм дорисует seam_rings -> двойной контур
+                       fill=base_col, outline=(0, 0, 0))
+            if ti == 0:
+                label(tp, "PEREHOD")
     ah = lay.get("arm_hole")
     if ah:
         dr.ellipse([T(ah["cx"] - ah["r"], ah["cy"] - ah["r"]), T(ah["cx"] + ah["r"], ah["cy"] + ah["r"])],
