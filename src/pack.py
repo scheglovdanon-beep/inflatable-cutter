@@ -68,10 +68,14 @@ def _movables(layout):
             if b.get("leg_seam") is not None:
                 b["leg_seam"] = affinity.translate(b["leg_seam"], dx, dy)
         add("leg", b.get("leg_seam") or box(lx, ly, lx + lw, ly + lh), mvleg)
+        _tseam = b.get("transition_seam") or []
         for i, tp in enumerate(b.get("transition", [])):               # переход-воронка (части) — свой ряд
             def mvt(dx, dy, i=i):
                 b["transition"][i] = affinity.translate(b["transition"][i], dx, dy)
-            add("transition", b["transition"][i], mvt)
+                ts = b.get("transition_seam")
+                if ts and i < len(ts):                                  # припуск едет вместе с деталью
+                    ts[i] = affinity.translate(ts[i], dx, dy)
+            add("transition", (_tseam[i] if i < len(_tseam) else tp), mvt)  # bbox по припуску -> зазор учтён
     return items
 
 

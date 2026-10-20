@@ -36,6 +36,8 @@ def add_seams(layout, seam_mm, arm_hole_seam=True):
             b["leg_seam"] = _out(box(lx, ly, lx + lw, ly + lh), seam_mm)
         fx, fy = b["fan_c"]; fr = b["fan_d"] / 2.0
         b["fan_seam_r"] = max(1.0, fr - seam_mm)                  # отверстие вентилятора: припуск внутрь
+        if b.get("transition"):                                   # переход-воронка (4 части) — припуск 10мм, как у всех
+            b["transition_seam"] = [_out(t, seam_mm) for t in b["transition"]]
     if arm_hole_seam:                                            # припуск-круг у отверстия руки (можно выключить)
         ah = layout.get("arm_hole")
         if ah:
@@ -85,4 +87,6 @@ def seam_rings(layout):
             rings.append(list(b["dnishe_seam"].exterior.coords))
         if b.get("leg_seam"):
             rings.append(list(b["leg_seam"].exterior.coords))
+        for t in b.get("transition_seam") or []:                  # переход-воронка: припуск (4 части)
+            rings.append(list(t.exterior.coords))
     return rings

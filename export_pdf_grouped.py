@@ -472,8 +472,9 @@ def _poly_pool(lay):
         b = lay["base"]
         pool["dnishe"].append(b.get("dnishe_seam") or b["dnishe"])
         lx, ly, lw, lh = b["leg"]; pool["nozhka"].append(b.get("leg_seam") or _bx(lx, ly, lx + lw, ly + lh))
+        _tseam = b.get("transition_seam") or []
         for i, tp in enumerate(b.get("transition", [])):
-            pool[f"perehod_{i}"].append(tp)
+            pool[f"perehod_{i}"].append(_tseam[i] if i < len(_tseam) else tp)   # припуск -> зазор в рулоне
     return pool
 
 
@@ -865,8 +866,12 @@ def main():
             if b.get("leg_seam"):
                 lb.append(("seam", _poly(list(b["leg_seam"].exterior.coords), stroke="#000000", sw=lw)))
         pieces.append(("nozhka", _emit_layers(lb, colors_top)))
+        _tseam = b.get("transition_seam") or []
         for ti, tp in enumerate(b.get("transition", [])):               # переход-воронка Ø300->Ø460 (4 части)
-            pieces.append((f"perehod_{ti}", _emit_layers(_filled(list(tp.exterior.coords), base_fill, lw, colors_top), colors_top)))
+            tb = _filled(list(tp.exterior.coords), base_fill, lw, colors_top)
+            if ti < len(_tseam):                                        # припуск 10мм (как у всех деталей)
+                tb.append(("seam", _poly(list(_tseam[ti].exterior.coords), stroke="#000000", sw=lw)))
+            pieces.append((f"perehod_{ti}", _emit_layers(tb, colors_top)))
 
     # ИНСТРУКЦИЯ ПО СБОРКЕ: копия всех деталей, уменьшенная в прямоугольник шириной 30 см,
     # с русскими подписями. Готовим её контент (кладём либо рядом, либо в рулон печати).
