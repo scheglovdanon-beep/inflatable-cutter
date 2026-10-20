@@ -363,12 +363,27 @@ def _interp(edge, f):
     return tuple(p[k] + t * (p[k + 1] - p[k]))
 
 
-def _snap_to_palette(c, pal):
-    """Ближайший цвет палитры к c (Евклид в RGB). pal пуст -> c как есть."""
+def _snap_to_palette(c, pal, sat_thr=0.18, hue_w=2.0, class_penalty=4000.0):
+    """Ближайший цвет палитры к c, но ПЕРЦЕПТИВНО (не чистый RGB — иначе светлая кожа утекает
+    в серый). Базовое RGB-расстояние + штраф за разницу ТОНА (для насыщенных) + большой штраф,
+    если один цвет насыщенный, а другой серый (сочное != серое). pal пуст -> c как есть."""
+    import colorsys
     if not pal:
         return tuple(int(v) for v in c)
-    a = (int(c[0]), int(c[1]), int(c[2]))
-    return min(pal, key=lambda p: (a[0] - p[0]) ** 2 + (a[1] - p[1]) ** 2 + (a[2] - p[2]) ** 2)
+    ch, cs, cv = colorsys.rgb_to_hsv(*[v / 255.0 for v in c])
+    c_sat = cs >= sat_thr
+
+    def dist(p):
+        d = sum((int(c[k]) - p[k]) ** 2 for k in range(3))           # база: RGB
+        ph, ps, pv = colorsys.rgb_to_hsv(*[v / 255.0 for v in p])
+        p_sat = ps >= sat_thr
+        if c_sat and p_sat:                                           # оба цветные -> важен тон
+            dh = abs(ch - ph); dh = min(dh, 1.0 - dh) * 360.0
+            d += (dh * hue_w) ** 2
+        if c_sat != p_sat:                                            # сочное <-> серое: не путать
+            d += class_penalty
+        return d
+    return min(pal, key=dist)
 
 
 def _coalesce_equal(bands):
