@@ -453,10 +453,10 @@ def detect_wrap_rings(page, contour_mm, fig, cfg):
             return False
         lx, _, rx, _ = inter.bounds
         return x0 <= lx + etol and x1 >= rx - etol
-    wmin = cfg.get("wrap_ring_min_width_frac", 0.55) * fw                 # кольцо суммарно широкое
-    hmax = cfg.get("wrap_ring_max_height_frac", 0.08) * fh                # и тонкое по высоте
-    aspect = cfg.get("wrap_ring_min_aspect", 4.0)                         # каждая заливка — горизонтально вытянутая
-    tmin = cfg.get("wrap_ring_min_thick_mm", 15.0)                        # не тоньше (тонкое = обводка, не кольцо)
+    wmin = cfg.get("wrap_ring_min_width_frac", 0.45) * fw                 # кольцо суммарно широкое (базовый порог)
+    hmax = cfg.get("wrap_ring_max_height_frac", 0.10) * fh                # и тонкое по высоте
+    aspect = cfg.get("wrap_ring_min_aspect", 3.0)                         # каждая заливка — горизонтально вытянутая
+    tmin = cfg.get("wrap_ring_min_thick_mm", 0.0)                         # мин.толщина (0=базовая: ловить всё, вкл.тонкие)
     sat_min = cfg.get("wrap_ring_sat_min", 0.35)
     val_min = cfg.get("wrap_ring_val_min", 0.35)
     qd = 24
