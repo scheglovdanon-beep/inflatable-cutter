@@ -129,10 +129,12 @@ def front_drawings(page, cfg=None):
 
 
 def front_target_height_mm(cfg):
-    """Общий рост фигуры (target_height_mm) включает ножку (leg_height_mm), которая
-    пристыковывается снизу отдельной деталью. Поэтому фактический рост переда/зада =
-    target_height_mm − leg_height_mm."""
-    return cfg["target_height_mm"] - cfg.get("leg_height_mm", 0)
+    """Рост переда/зада = ПОЛНЫЙ target_height_mm. Ножка — отдельная деталь и в размер фигуры
+    НЕ входит (сказали не учитывать): если фигура 3300 — перёд строим на 3300.
+    Старое поведение (target = фигура + ножка, перёд = target − leg) — флаг subtract_leg_height."""
+    if cfg.get("subtract_leg_height", False):
+        return cfg["target_height_mm"] - cfg.get("leg_height_mm", 0)
+    return cfg["target_height_mm"]
 
 
 def get_front_figure(page, cfg):
