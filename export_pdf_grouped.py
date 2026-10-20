@@ -58,23 +58,29 @@ def _filled(pts, fill, sw, colors_top, stroke="#000"):
 # на углы нашей ножки (с учётом поворота в раскладке), контент pt -> мм (scale PT2MM).
 _LEG_CONST_SVG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "leg_const.svg")
 _LEG_CONST_INNER = None
+_LEG_CONST_SCALE = None
+_LEG_CONST_W_MM = 1540.0                                              # реальная ширина контента детали (чёрный 1520 + рамка 10)
 
 
 def _leg_const_svg(leg_pts):
     """Вставить готовую деталь-ножку (вектор) на место ножки leg_pts (сшив 1520×150). Возвращает
     [svg]. Чёрный прямоугольник детали (рамка 10мм -> углы (10,10)..(1530,160) в мм контента)
-    совмещаем с углами ножки; рамка-припуск выходит наружу на 10мм (как наш seam)."""
-    global _LEG_CONST_INNER
+    совмещаем с углами ножки; рамка-припуск выходит наружу на 10мм (как наш seam). Масштаб кадра
+    детали (единицы viewBox) -> мм считаем из viewBox (ассет = inkscape plain SVG, контент = 1540мм)."""
+    global _LEG_CONST_INNER, _LEG_CONST_SCALE
     if _LEG_CONST_INNER is None:
+        import re
         s = open(_LEG_CONST_SVG, encoding="utf-8").read()
+        m = re.search(r'viewBox="[\d.\-]+ [\d.\-]+ ([\d.]+) [\d.]+"', s)
+        vbw = float(m.group(1)) if m else _LEG_CONST_W_MM
+        _LEG_CONST_SCALE = _LEG_CONST_W_MM / vbw                      # единицы кадра детали -> мм
         _LEG_CONST_INNER = s[s.find(">", s.find("<svg")) + 1: s.rfind("</svg>")]
     src = np.array([[10.0, 10.0], [1530.0, 10.0], [10.0, 160.0]])     # TL,TR,BL чёрного в контент-мм
     dst = np.array([leg_pts[0], leg_pts[1], leg_pts[3]], float)       # соответств. углы ножки
     Mx = np.hstack([src, np.ones((3, 1))])
     ax = np.linalg.solve(Mx, dst[:, 0]); ay = np.linalg.solve(Mx, dst[:, 1])
-    PT2MM = 25.4 / 72.0
     return [f'<g transform="matrix({ax[0]:.6f},{ay[0]:.6f},{ax[1]:.6f},{ay[1]:.6f},{ax[2]:.3f},{ay[2]:.3f})">'
-            f'<g transform="scale({PT2MM:.6f})">{_LEG_CONST_INNER}</g></g>']
+            f'<g transform="scale({_LEG_CONST_SCALE:.8f})">{_LEG_CONST_INNER}</g></g>']
 
 
 def _bez(p0, p1, p2, p3, n=6):
