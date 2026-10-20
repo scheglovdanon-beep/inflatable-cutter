@@ -374,10 +374,13 @@ def _hand_tex(page, poly, src, cid, zoom=6.0):
             f'preserveAspectRatio="none" xlink:href="data:image/png;base64,{png}"/></g>']
 
 
-def _piece_svg(page, p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill="#f5f5f5", colors_top=True):
+def _piece_svg(page, p, kind, arm_dds, f_mm, lw, cid, arm_fill="none", hand_fill="#f5f5f5", colors_top=True, seam_keys=None):
     """SVG-элементы одной детали руки/кисти: текстура/контур + припуск. Порядок слоёв — через
-    _emit_layers (цвета сверху при colors_top)."""
+    _emit_layers (цвета сверху при colors_top). seam_keys — готовые <path>-ключи швов (seamlines)."""
     poly = p["poly"]; tagged = []
+    for el in (seam_keys or []):                                      # ключи-подсветки швов (с кем сшивается)
+        if el:
+            tagged.append(("seamlines", el))
     if kind == "hand":
         if p.get("src") is not None:
             for el in _hand_tex(page, poly, p["src"], cid):
@@ -631,6 +634,18 @@ def main():
     # Дуги лежат В КОЛЬЦЕ ПРИПУСКА (не заходят за контур). Маркер «рука здесь» оставляем всегда.
     seam_lines = cfg.get("seam_color_lines", True)
     seam_bands = cfg.get("seam_color_bands", False)
+    # Ключи-подсветки швов на ВСЕХ деталях: один цвет на ОБОИХ сшиваемых рёбрах (с кем сшивается).
+    _skey = {}; _skctr = [40]                                         # стабильные тусклые цвета по имени стыка
+    def seamcol(nm):
+        if nm not in _skey:
+            _skey[nm] = HEX(_palette(_skctr[0])); _skctr[0] += 1
+        return _skey[nm]
+    C_hole = seamcol("hole_baza"); C_bp = seamcol("baza_plecho")      # цепочка руки: отверстие→база→плечо→предпл→кисть
+    C_pp = seamcol("plecho_pred"); C_ph = seamcol("pred_hand")
+    C_hgus = seamcol("hand_gusset")                                   # гассет кисти ↔ грани кисти
+    C_fdn = seamcol("front_dnishe"); C_bdn = seamcol("back_dnishe")   # низ переда/зада ↔ днище
+    C_fan = seamcol("dnishe_fan"); C_leg = seamcol("trans_leg")       # днище-фан ↔ переход-внешн; переход-внутр ↔ ножка
+    _arm_chain = {"baza": (C_hole, C_bp), "plecho": (C_bp, C_pp), "predplechie": (C_pp, C_ph)}
     tf_f = _tex_tf(contour_mm, lay["front"], f_mm); gl = g["gusset_line"]
 
     def _arc_on(a_from, a_to):                                        # точки дуги gusset_line (кадр переда)
@@ -651,6 +666,8 @@ def main():
             front_arcs.append((HEX(_palette(s["i"])), _arc_on(s["arc0"], s["arc1"])))
     for seg in lay.get("arm_cut_marks", []):                          # ЛИНИЯ РЕЗА ПЛЕЧА (где пристыковывается рука)
         front_arcs.append(("#cc5500", list(seg)))                     # dull-оранжевый = «рука здесь»
+    if seam_lines and g.get("bottom_pts"):                            # низ переда ↔ днище (та же дуга -> кадр переда)
+        front_arcs.append((C_fdn, [tf_f(*(np.asarray(p) / f_mm)) for p in g["bottom_pts"]]))
 
     def _arc_paths(arcs, panel, gid):
         pp = _prep2(panel); out = [f'<g id="{gid}">']
@@ -763,6 +780,39 @@ def main():
         pts = [at(f0)] + [tuple(arr[k]) for k in range(len(arr)) if f0 < cum[k] < f1] + [at(f1)]
         return pts
 
+    def _two_arcs(coords):
+        """Разбить контур детали на 2 дуги (верх, низ) по крайним левой/правой точкам."""
+        pts = list(coords)
+        if len(pts) > 1 and pts[0] == pts[-1]:
+            pts = pts[:-1]
+        n = len(pts)
+        if n < 3:
+            return pts, pts
+        i0 = min(range(n), key=lambda i: pts[i][0]); i1 = max(range(n), key=lambda i: pts[i][0])
+
+        def chain(a, b):
+            r = []; k = a
+            while True:
+                r.append(pts[k])
+                if k == b:
+                    break
+                k = (k + 1) % n
+            return r
+        c1 = chain(i0, i1); c2 = chain(i1, i0)
+        m1 = sum(p[1] for p in c1) / len(c1); m2 = sum(p[1] for p in c2) / len(c2)
+        return (c1, c2) if m1 < m2 else (c2, c1)                      # (верх, низ)
+
+    def _plen2(pts):
+        a = np.asarray(pts, float)
+        return float(np.hypot(*np.diff(a, axis=0).T).sum()) if len(a) > 1 else 0.0
+
+    def _keyline(edge, cen, color):
+        """SVG-ключ (seamlines): ребро detail, смещённое наружу в кольцо припуска, цветом color."""
+        if len(edge) < 2:
+            return None
+        d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(edge, np.asarray(cen, float), off))
+        return f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{sw_seam}" stroke-linecap="round"/>'
+
     for s in lay["strips"]:
         tagged = [("colors", _poly(q, fill=HEX(c), stroke="none", sw=0)) for q, c in strip_band_quads(s)]
         # цветной ключ: тот же цвет, что дуга переда (_palette[i]), вдоль ОБОИХ длинных рёбер
@@ -829,9 +879,23 @@ def main():
         if src is not None and _hand_back and (hp.get("name") or "").startswith("правая сторона"):
             src = _src_to_back(src); hp = {**hp, "src": src}        # зад кисти = текстура с заднего тела
         dds = _dds_for_src(src) if src is not None else arm_dds
-        pieces.append((f"kist_{hp['name']}", _piece_svg(page, hp, "hand", dds, f_mm, lw, nextid(), hand_fill=hand_fill, colors_top=colors_top)))
+        sk = []
+        if seam_lines:
+            coords = list(hp["poly"].exterior.coords); cen = hp["poly"].centroid.coords[0]
+            top, bot = _two_arcs(coords); nm = hp.get("name") or ""
+            if nm.startswith("боковина"):                             # гассет кисти: оба длинных ребра ↔ грани кисти
+                sk = [_keyline(top, cen, C_hgus), _keyline(bot, cen, C_hgus)]
+            else:                                                     # грань кисти: верх(дуга)↔гассет, низ↔предплечье(opening)
+                sk = [_keyline(top, cen, C_hgus), _keyline(bot, cen, C_ph)]
+        pieces.append((f"kist_{hp['name']}", _piece_svg(page, hp, "hand", dds, f_mm, lw, nextid(), hand_fill=hand_fill, colors_top=colors_top, seam_keys=sk)))
     for apc in lay.get("arm_pieces", []):
-        pieces.append((f"ruka_{apc.get('name','?')}", _piece_svg(page, apc, "arm", arm_dds, f_mm, lw, nextid(), arm_fill, colors_top=colors_top)))
+        sk = []
+        cols = _arm_chain.get(apc.get("name"))
+        if seam_lines and cols:                                       # цепочка сложена вертикально: база внизу, кисть вверху
+            coords = list(apc["poly"].exterior.coords); cen = apc["poly"].centroid.coords[0]
+            top, bot = _two_arcs(coords)                              # низ(к базе/отверстию)=cols[0], верх(к кисти)=cols[1]
+            sk = [_keyline(bot, cen, cols[0]), _keyline(top, cen, cols[1])]
+        pieces.append((f"ruka_{apc.get('name','?')}", _piece_svg(page, apc, "arm", arm_dds, f_mm, lw, nextid(), arm_fill, colors_top=colors_top, seam_keys=sk)))
 
     # ЗАПАСНАЯ РУКА — КАЖДАЯ деталь своей группой (чтобы в рулон укладывались по отдельности,
     # иначе разбросанная колонка-запаска как единый блок не влезает в 1440). Позиции в раскладке те же.
@@ -853,6 +917,13 @@ def main():
             db.append(("holes", _circle(fx, fy, b["fan_seam_r"], "#000000", lw)))
         if b.get("dnishe_seam"):
             db.append(("seam", _poly(list(b["dnishe_seam"].exterior.coords), stroke="#000000", sw=lw)))
+        if seam_lines:                                               # ключи: верх↔перёд, низ↔зад, фан↔переход
+            dcen = b["dnishe"].centroid.coords[0]
+            dtop, dbot = _two_arcs(list(b["dnishe"].exterior.coords))
+            for el in (_keyline(dtop, dcen, C_fdn), _keyline(dbot, dcen, C_bdn)):
+                if el:
+                    db.append(("seamlines", el))
+            db.append(("seamlines", _circle(fx, fy, r, C_fan, sw_seam)))
         pieces.append(("dnishe", _emit_layers(db, colors_top)))
         if b.get("leg_poly") is not None:                            # ножка повёрнута (nesting)
             leg_pts = list(b["leg_poly"].exterior.coords)
@@ -865,12 +936,24 @@ def main():
             lb = _filled(leg_pts, base_fill, lw, colors_top)
             if b.get("leg_seam"):
                 lb.append(("seam", _poly(list(b["leg_seam"].exterior.coords), stroke="#000000", sw=lw)))
+        if seam_lines and b.get("transition"):                       # ножка верх ↔ переход (широкая дуга)
+            lc4 = leg_pts[:4]; lcen = (sum(p[0] for p in lc4) / 4.0, sum(p[1] for p in lc4) / 4.0)
+            ltop, _lbot = _two_arcs(lc4)
+            el = _keyline(ltop, lcen, C_leg)
+            if el:
+                lb.append(("seamlines", el))
         pieces.append(("nozhka", _emit_layers(lb, colors_top)))
         _tseam = b.get("transition_seam") or []
         for ti, tp in enumerate(b.get("transition", [])):               # переход-воронка Ø300->Ø460 (4 части)
             tb = _filled(list(tp.exterior.coords), base_fill, lw, colors_top)
             if ti < len(_tseam):                                        # припуск 10мм (как у всех деталей)
                 tb.append(("seam", _poly(list(_tseam[ti].exterior.coords), stroke="#000000", sw=lw)))
+            if seam_lines:                                              # широкая (460)↔ножка; узкая (300)↔днище-фан
+                tcen = tp.centroid.coords[0]; a1, a2 = _two_arcs(list(tp.exterior.coords))
+                wide, narrow = (a1, a2) if _plen2(a1) >= _plen2(a2) else (a2, a1)
+                for el in (_keyline(wide, tcen, C_leg), _keyline(narrow, tcen, C_fan)):
+                    if el:
+                        tb.append(("seamlines", el))
             pieces.append((f"perehod_{ti}", _emit_layers(tb, colors_top)))
 
     # ИНСТРУКЦИЯ ПО СБОРКЕ: копия всех деталей, уменьшенная в прямоугольник шириной 30 см,
