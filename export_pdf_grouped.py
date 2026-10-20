@@ -29,8 +29,9 @@ def _palette_vivid(i):
 
 
 # ---------- ПОРЯДОК СЛОЁВ ДЕТАЛИ: цвета СВЕРХУ (чтобы правки цветов кликались первыми в Corel) ----------
-# Сзади -> вперёд: припуск(+10) -> цветные линии вшива -> контур реза -> ЦВЕТА/текстура(верх).
-_LAYER_Z = {"seam": 0, "seamlines": 1, "contour": 2, "colors": 3}
+# Сзади -> вперёд: припуск(+10) -> цветные линии вшива -> контур реза -> ЦВЕТА/текстура -> ОТВЕРСТИЯ(верх).
+# holes (круги отверстия руки и днища/вентилятора) — ПОВЕРХ ВСЕГО, чтобы были видны над заливкой.
+_LAYER_Z = {"seam": 0, "seamlines": 1, "contour": 2, "colors": 3, "holes": 4}
 
 
 def _emit_layers(tagged, colors_top):
@@ -784,15 +785,15 @@ def main():
         tagged.append(("contour", _poly(list(s["poly"]), stroke="#000", sw=lw)))   # контур детали — чёрный
         if s.get("seam"):
             tagged.append(("seam", _poly(list(s["seam"].exterior.coords), stroke="#000000", sw=lw)))
-        if ah and ah.get("piece") == s["i"]:
-            tagged.append(("contour", _circle(ah["cx"], ah["cy"], ah["r"], "#000000", lw)))
+        if ah and ah.get("piece") == s["i"]:                          # отверстие руки — ПОВЕРХ всего (слой holes)
+            tagged.append(("holes", _circle(ah["cx"], ah["cy"], ah["r"], "#000000", lw)))
             if ah.get("seam_r"):
-                tagged.append(("seam", _circle(ah["cx"], ah["cy"], ah["seam_r"], "#000000", lw)))
+                tagged.append(("holes", _circle(ah["cx"], ah["cy"], ah["seam_r"], "#000000", lw)))
         for h in lay.get("arm_holes", []):                            # отверстия рук (список) на своей боковине
             if h.get("piece") == s["i"]:
-                tagged.append(("contour", _circle(h["cx"], h["cy"], h["r"], "#000000", lw)))
+                tagged.append(("holes", _circle(h["cx"], h["cy"], h["r"], "#000000", lw)))
                 if h.get("seam_r"):
-                    tagged.append(("seam", _circle(h["cx"], h["cy"], h["seam_r"], "#000000", lw)))
+                    tagged.append(("holes", _circle(h["cx"], h["cy"], h["seam_r"], "#000000", lw)))
         # ЗАКРУГЛЕНИЕ ПЛЕЧА: цветная линия купола по зонам сшива — В ТЕЛЕ боковины (едет с деталью в рулон).
         # Смещаем НАРУЖУ в кольцо припуска (как ключ у всех деталей) -> не заходит за контур реза.
         for seg in (lay.get("shoulder_arc_segments", []) if seam_lines else []):
@@ -840,9 +841,9 @@ def main():
     if b:
         db = _filled(list(b["dnishe"].exterior.coords), base_fill, lw, colors_top)
         fx, fy = b["fan_c"]; r = b["fan_d"] / 2
-        db.append(("contour", _circle(fx, fy, r, "#000000", lw)))
+        db.append(("holes", _circle(fx, fy, r, "#000000", lw)))        # отверстие вентилятора/днища — ПОВЕРХ всего
         if b.get("fan_seam_r"):
-            db.append(("seam", _circle(fx, fy, b["fan_seam_r"], "#000000", lw)))
+            db.append(("holes", _circle(fx, fy, b["fan_seam_r"], "#000000", lw)))
         if b.get("dnishe_seam"):
             db.append(("seam", _poly(list(b["dnishe_seam"].exterior.coords), stroke="#000000", sw=lw)))
         pieces.append(("dnishe", _emit_layers(db, colors_top)))
