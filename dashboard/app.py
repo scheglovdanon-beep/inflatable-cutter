@@ -185,10 +185,11 @@ def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, c
     wrist?:[[..],[..]], elbow?:[[..],[..]]}] в PT. spare — запасная рука (None=как в базе);
     back_copy — зад=копия переда (симметричная фигура; убирает лишние детали руки у 2-рукой);
     clip_outline — обрезать контур по чёрной обводке (стикер-макеты с запасом заливок);
-    seam_color_lines — цвет-ключ вшива на переде/боковинах (деф. ВЫКЛ, пока пробуем без него)."""
+    seam_color_lines — цвет-ключ вшива на переде/гассете/заде (деф. ВКЛ: тусклая подсветка мест
+    сшива перёд↔гассет↔зад на всех деталях; выключить явным False)."""
     cfg = _base_cfg(size)
     _apply_clip_outline(cfg, clip_outline)
-    cfg["seam_color_lines"] = bool(seam_color_lines)                  # цветные линии вшива — деф. выкл в дашборде
+    cfg["seam_color_lines"] = True if seam_color_lines is None else bool(seam_color_lines)  # тусклая подсветка швов — ВКЛ по умолчанию
     if shoulder_round is not None:                                    # закругление плеча (купол у шеи)
         cfg["shoulder_round"] = bool(shoulder_round)
     cfg["arm_hole_no_seam"] = True                                    # у отверстия руки без припуск-обводки
