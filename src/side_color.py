@@ -536,6 +536,30 @@ def _splice_band(bands, fa, fb, color):
     return m
 
 
+def _fill_white_nearest(bands, white_sum=705):
+    """Белые/near-белые зоны закрасить ближайшим ПО ПОЗИЦИИ не-белым соседом (закругления/вырезы
+    не остаются белыми). Если не-белых зон нет совсем — оставить как есть (белым)."""
+    if not bands:
+        return bands
+    is_white = lambda c: sum(int(v) for v in c) >= white_sum
+    nonwhite = [i for i, b in enumerate(bands) if not is_white(b[2])]
+    if not nonwhite:
+        return bands
+    out = []
+    for i, (f0, f1, c) in enumerate(bands):
+        if is_white(c):
+            j = min(nonwhite, key=lambda k: abs(k - i))
+            c = bands[j][2]
+        out.append((f0, f1, tuple(c)))
+    merged = []                                                         # слить соседние одинаковые
+    for b in out:
+        if merged and tuple(merged[-1][2]) == tuple(b[2]):
+            merged[-1] = (merged[-1][0], b[1], merged[-1][2])
+        else:
+            merged.append(list(b))
+    return [(g[0], g[1], tuple(g[2])) for g in merged]
+
+
 def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
     """Залить каждую полосу цветными зонами = цвет макета на её дуге переда.
     Пишет в каждую полосу layout['strips'] список s['bands'] = [(f0,f1,(r,g,b))]."""
@@ -663,6 +687,8 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
                 ks = [k for k in range(M) if rg["y0"] <= ey[k] <= rg["y1"]]
                 if ks:                                                                # эта боковина проходит высоту кольца
                     bands = _splice_band(bands, float(fs[min(ks)]), float(fs[max(ks) + 1]), rg["color"])
+        if cfg.get("gusset_fill_white_nearest"):                                      # белые зоны -> ближайший не-белый
+            bands = _fill_white_nearest(bands, cfg.get("gusset_white_sum", 705))
         s["bands"] = bands
 
 

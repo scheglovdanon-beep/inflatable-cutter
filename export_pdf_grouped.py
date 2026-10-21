@@ -842,13 +842,15 @@ def main():
         tagged.append(("contour", _poly(list(s["poly"]), stroke="#000", sw=lw)))   # контур детали — чёрный
         if s.get("seam"):
             tagged.append(("seam", _poly(list(s["seam"].exterior.coords), stroke="#000000", sw=lw)))
+        hcol = cfg.get("arm_hole_mark_color", "#000000")              # цвет отверстия руки (видимый на тёмной боковине)
+        hsw = lw * (2.5 if hcol != "#000000" else 1.0)
         if ah and ah.get("piece") == s["i"]:                          # отверстие руки — ПОВЕРХ всего (слой holes)
-            tagged.append(("holes", _circle(ah["cx"], ah["cy"], ah["r"], "#000000", lw)))
+            tagged.append(("holes", _circle(ah["cx"], ah["cy"], ah["r"], hcol, hsw)))
             if ah.get("seam_r"):
-                tagged.append(("holes", _circle(ah["cx"], ah["cy"], ah["seam_r"], "#000000", lw)))
+                tagged.append(("holes", _circle(ah["cx"], ah["cy"], ah["seam_r"], hcol, hsw)))
         for h in lay.get("arm_holes", []):                            # отверстия рук (список) на своей боковине
             if h.get("piece") == s["i"]:
-                tagged.append(("holes", _circle(h["cx"], h["cy"], h["r"], "#000000", lw)))
+                tagged.append(("holes", _circle(h["cx"], h["cy"], h["r"], hcol, hsw)))
                 if h.get("seam_r"):
                     tagged.append(("holes", _circle(h["cx"], h["cy"], h["seam_r"], "#000000", lw)))
         # ЗАКРУГЛЕНИЕ ПЛЕЧА: цветная линия купола по зонам сшива — В ТЕЛЕ боковины (едет с деталью в рулон).

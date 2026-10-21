@@ -190,6 +190,9 @@ def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, c
     cfg = _base_cfg(size)
     _apply_clip_outline(cfg, clip_outline)
     cfg["seam_color_lines"] = True if seam_color_lines is None else bool(seam_color_lines)  # тусклая подсветка швов — ВКЛ по умолчанию
+    cfg["seam_color_bands"] = True                                    # полоски-ключи по ЦВЕТОВЫМ зонам на гассете/переде/заде
+    cfg["gusset_fill_white_nearest"] = True                           # белые зоны/закругления -> ближайший не-белый цвет
+    cfg["arm_hole_mark_color"] = "#ff2a00"                            # отверстие руки — ярким (видно на тёмной боковине)
     if shoulder_round is not None:                                    # закругление плеча (купол у шеи)
         cfg["shoulder_round"] = bool(shoulder_round)
     cfg["arm_hole_no_seam"] = True                                    # у отверстия руки без припуск-обводки
