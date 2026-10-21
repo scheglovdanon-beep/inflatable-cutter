@@ -191,7 +191,8 @@ def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, c
     _apply_clip_outline(cfg, clip_outline)
     cfg["seam_color_lines"] = True if seam_color_lines is None else bool(seam_color_lines)  # тусклая подсветка швов — ВКЛ по умолчанию
     cfg["seam_color_bands"] = True                                    # полоски-ключи по ЦВЕТОВЫМ зонам на гассете/переде/заде
-    cfg["gusset_fill_white_nearest"] = True                           # белые зоны/закругления -> ближайший не-белый цвет
+    # gusset_fill_white_nearest НЕ включаем: белая зона гассета = реальный белый кромки (носок кроссовка) -> оставить белым.
+    # Настоящие геометрические зазоры чинит fill_edge_gaps (растр переда/зада), а не перекраска зон гассета.
     cfg["arm_hole_mark_color"] = "#ff2a00"                            # отверстие руки — ярким (видно на тёмной боковине)
     cfg["fill_edge_gaps"] = True                                      # белые зазоры по краю переда/зада -> ближайший цвет
     if shoulder_round is not None:                                    # закругление плеча (купол у шеи)
