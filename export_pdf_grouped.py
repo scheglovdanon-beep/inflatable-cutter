@@ -159,6 +159,7 @@ def _stroke_paths(geom, stroke, sw):
 
 
 _BG_COLS = []                                                         # цвета фоновых прямоугольников макета (заполняется в main)
+_FILL_GAPS = False                                                    # заполнять белые зазоры по краю переда/зада (из cfg)
 
 
 def _bg_fill_colors(page, cfg):
@@ -179,11 +180,13 @@ def _bg_fill_colors(page, cfg):
     return cols
 
 
-def _pix_png_nobg(pix, bg_cols, tol=40):
+def _pix_png_nobg(pix, bg_cols, tol=40, fill_mask=None, white_sum=720):
     """Убрать фон макета из растра. Цвет фона берём из вектора (bg_cols = _bg_fill_colors —
     большой прямоугольник нижнего слоя), но прозрачим ТОЛЬКО область этого цвета, СВЯЗАННУЮ С
     КРАЕМ растра (фон окружает фигуру снаружи). Карман того же цвета ВНУТРИ контура (напр. серые
-    штаны охотников) с краем не связан -> остаётся. near-белый фон (бумага) не трогаем."""
+    штаны охотников) с краем не связан -> остаётся. near-белый фон (бумага) не трогаем.
+    fill_mask (px-маска контура детали): ЗАЗОРЫ по краю (сглаженный контур расходится с текстурой)
+    — фон/near-белое ВНУТРИ контура и связанное с внешним краем — залить ближайшим цветом дизайна."""
     import numpy as np, cv2, io
     from PIL import Image
     a = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)
@@ -199,6 +202,20 @@ def _pix_png_nobg(pix, bg_cols, tol=40):
         if not border:
             continue
         img[np.isin(lbl, list(border)), 3] = 0                       # прозрачим только фон у края (не внутр. карманы)
+    if fill_mask is not None:                                        # ЗАПОЛНИТЬ зазоры по краю ближайшим цветом
+        from scipy import ndimage
+        alpha = img[:, :, 3]
+        bg = (alpha == 0) | (rgb.sum(2) >= white_sum)                # фон(прозрачный) ИЛИ near-белая бумага
+        design = ~bg
+        if design.any() and bg.any():
+            nb, lbl = cv2.connectedComponents(bg.astype(np.uint8), connectivity=4)
+            border = set(lbl[0, :]).union(lbl[H - 1, :], lbl[:, 0], lbl[:, W - 1]); border.discard(0)
+            bc = np.isin(lbl, list(border)) if border else np.zeros((H, W), bool)
+            fill = (fill_mask > 0) & bg & bc                         # внутри контура ∧ фон ∧ связан с внешним краем
+            if fill.any():
+                idx = ndimage.distance_transform_edt(bg, return_indices=True)[1]
+                img[fill, :3] = img[idx[0][fill], idx[1][fill], :3]  # ближайший дизайн-пиксель
+                img[fill, 3] = 255
     buf = io.BytesIO(); Image.fromarray(img, "RGBA").save(buf, "PNG")
     return buf.getvalue()
 
@@ -211,8 +228,15 @@ def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0):
     import base64
     clip = pymupdf.Rect(*src_bbox_pt)
     pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=True)
-    png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS)).decode()     # убрать фон макета (по цвету из вектора)
     x0, y0 = tf(clip.x0, clip.y0); x1, y1 = tf(clip.x1, clip.y1)       # угол панели (аффин без поворота)
+    fmask = None
+    if _FILL_GAPS:                                                     # px-маска контура детали (без утечки за контур)
+        import numpy as np, cv2
+        minx, miny = min(x0, x1), min(y0, y1); wd = abs(x1 - x0) or 1.0; ht = abs(y1 - y0) or 1.0
+        cp = np.array([((px - minx) / wd * pix.width, (py - miny) / ht * pix.height)
+                       for px, py in contour.exterior.coords], np.int32)
+        fmask = np.zeros((pix.height, pix.width), np.uint8); cv2.fillPoly(fmask, [cp], 1)
+    png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS, fill_mask=fmask)).decode()   # убрать фон + залить зазоры
     cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in contour.exterior.coords)
     return (f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'
             f'<image clip-path="url(#{cid})" x="{min(x0, x1):.2f}" y="{min(y0, y1):.2f}" '
@@ -545,8 +569,9 @@ def main():
     cfg = yaml.safe_load(open(args.config, encoding="utf-8"))
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     page = pymupdf.open(args.input_pdf)[0]
-    global _BG_COLS
+    global _BG_COLS, _FILL_GAPS
     _BG_COLS = _bg_fill_colors(page, cfg)                             # цвета фона из вектора (нижний слой-прямоугольник)
+    _FILL_GAPS = bool(cfg.get("fill_edge_gaps"))                      # заполнять белые зазоры по краю переда/зада
 
     lay, fig, contour_mm, g, arm_pts, seam_mm = build_layout(page, cfg)
     lw = cfg.get("line_width_mm", 0.2); f_mm = fig.s * PT2MM
