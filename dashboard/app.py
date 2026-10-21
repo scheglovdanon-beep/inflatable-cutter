@@ -896,6 +896,9 @@ def build():
                      spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co,
                      details=data.get("details"), shoulder_round=data.get("shoulder_round"),
                      seam_color_lines=data.get("seam_color_lines"))
+    if data.get("manual_paint"):                                     # РУЧНАЯ покраска гассета (отрезки t0,t1,cmyk)
+        cfg["manual_paint"] = data["manual_paint"]
+        cfg["seam_color_bands"] = False                             # в ручном режиме авто-полоски не нужны
     jid = uuid.uuid4().hex[:10]
     job = {"id": jid, "sid": sid, "cfg": cfg, "want_svg": bool(data.get("svg", True)),
            "name": (data.get("name") or "макет"), "size": size, "n_arms": n,
