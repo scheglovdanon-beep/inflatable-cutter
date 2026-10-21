@@ -560,9 +560,52 @@ def _fill_white_nearest(bands, white_sum=705):
     return [(g[0], g[1], tuple(g[2])) for g in merged]
 
 
+def _cmyk2rgb(c):
+    """CMYK (доли 0..1) -> RGB (0..255) для ПРЕВЬЮ (наивная конверсия; вывод печати — CMYK)."""
+    cc, m, y, k = [float(v) for v in c]
+    return (int(round(255 * (1 - cc) * (1 - k))),
+            int(round(255 * (1 - m) * (1 - k))),
+            int(round(255 * (1 - y) * (1 - k))))
+
+
+def _bands_from_manual(s, manual, glen):
+    """РУЧНАЯ покраска: bands боковины из отрезков manual=[(t0,t1,(c,m,y,k))] (t — доля периметра
+    gusset_line [0..1]). Возвращает (bands_rgb, bands_cmyk) по пересечению дуги боковины с отрезком."""
+    a0, a1 = s["arc0"], s["arc1"]
+    flip = s.get("yn0", 0) < s.get("yn1", 0)
+    a_top, a_bot = (a1, a0) if flip else (a0, a1)                     # f=0 у верхнего ребра
+    span = a_bot - a_top
+    if abs(span) < 1e-9 or glen <= 0:
+        return [], []
+    lo, hi = min(a_top, a_bot), max(a_top, a_bot)
+    out = []
+    for seg in manual:
+        t0, t1, cmyk = seg[0], seg[1], seg[2]
+        m0, m1 = t0 * glen, t1 * glen
+        ov0, ov1 = max(lo, min(m0, m1)), min(hi, max(m0, m1))
+        if ov1 - ov0 <= 1e-6:
+            continue
+        fa = (ov0 - a_top) / span; fb = (ov1 - a_top) / span
+        f0, f1 = sorted((fa, fb))
+        out.append((max(0.0, f0), min(1.0, f1), tuple(float(v) for v in cmyk)))
+    out.sort()
+    bands_rgb = [(f0, f1, _cmyk2rgb(c)) for f0, f1, c in out]
+    bands_cmyk = [(f0, f1, c) for f0, f1, c in out]
+    return bands_rgb, bands_cmyk
+
+
 def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
     """Залить каждую полосу цветными зонами = цвет макета на её дуге переда.
-    Пишет в каждую полосу layout['strips'] список s['bands'] = [(f0,f1,(r,g,b))]."""
+    Пишет в каждую полосу layout['strips'] список s['bands'] = [(f0,f1,(r,g,b))].
+    РУЧНОЙ режим (cfg['manual_paint']): bands строятся из отрезков пользователя (цвет CMYK)."""
+    manual = cfg.get("manual_paint")
+    if manual:                                                        # РУЧНАЯ покраска гассета (CMYK как в макете)
+        glen = g.get("gusset_len") or 1.0
+        for s in layout["strips"]:
+            br, bc = _bands_from_manual(s, manual, glen)
+            s["bands"] = br
+            s["bands_cmyk"] = bc
+        return
     arr, bx0, by0, Z, mg = front_raster(page, front_drawings_fn)
     H, W = arr.shape[:2]
     f_mm = fig.s * PT2MM                                              # 1 pt = f_mm мм
