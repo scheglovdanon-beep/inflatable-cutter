@@ -839,7 +839,10 @@ def main():
         return f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{sw_seam}" stroke-linecap="round"/>'
 
     for s in lay["strips"]:
-        tagged = [("colors", _poly(q, fill=HEX(c), stroke="none", sw=0)) for q, c in strip_band_quads(s)]
+        # RGB-заливки гассета (обычный режим). В РУЧНОМ режиме (manual_paint) заливки гассета
+        # пишутся нативным CMYK поверх (ниже, на master-странице) — здесь их НЕ рисуем.
+        tagged = [] if (cfg.get("manual_paint") and cfg.get("gusset_cmyk", True)) else \
+            [("colors", _poly(q, fill=HEX(c), stroke="none", sw=0)) for q, c in strip_band_quads(s)]
         # цветной ключ: тот же цвет, что дуга переда (_palette[i]), вдоль ОБОИХ длинных рёбер
         # (стык с передом и с задом), ЦЕЛИКОМ в кольце припуска, с зазором от чёрного контура.
         cen = np.asarray(_Poly(list(s["poly"])).centroid.coords[0], float)
@@ -1032,6 +1035,17 @@ def main():
 
     master = pymupdf.open(); mpage = master.new_page(width=W * MM2PT, height=H * MM2PT)
     mpage.draw_rect(mpage.rect, color=None, fill=(1, 1, 1))
+    if cfg.get("manual_paint") and cfg.get("gusset_cmyk", True):      # НАТИВНЫЙ CMYK-гассет (точный цвет макета) ПОД контуром
+        from side_color import strip_band_quads_cmyk
+        for s in lay.get("strips", []):
+            if not s.get("bands_cmyk"):
+                continue
+            for quad, cmyk in strip_band_quads_cmyk(s):
+                pts = [pymupdf.Point(x * MM2PT, y * MM2PT) for x, y in quad]
+                shp = mpage.new_shape()
+                shp.draw_polyline(pts + [pts[0]])
+                shp.finish(fill=tuple(float(v) for v in cmyk), color=None, closePath=True)
+                shp.commit()
     # каждая деталь -> свой слой (PDF OCG) с именем детали: Corel импортирует деталь ЦЕЛИКОМ
     # (контур+заливка+текстура+припуск на одном слое), её можно переносить как единое целое.
     for name, body in pieces:

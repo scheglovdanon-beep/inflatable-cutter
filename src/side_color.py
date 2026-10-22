@@ -735,13 +735,14 @@ def color_sides(layout, g, contour_mm, fig, page, front_drawings_fn, cfg):
         s["bands"] = bands
 
 
-def strip_band_quads(s):
-    """Для полосы с s['bands'] вернуть [(quad_pts, color)] в координатах раскладки."""
+def strip_band_quads(s, key="bands"):
+    """Для полосы с s[key] вернуть [(quad_pts, color)] в координатах раскладки.
+    key='bands_cmyk' -> цвет = CMYK-доли (для нативного CMYK-вывода в PDF)."""
     poly = s["poly"]
     dome_n = s.get("dome_n") or 0
     left, right = _edges_top_down(poly, s.get("waist") is not None, dome_n)
     out = []
-    bands = s.get("bands", [])
+    bands = s.get(key, [])
     if dome_n and dome_n >= 2 and bands:                                 # шапка-купол = цвет верхней полосы
         out.append((list(poly[:dome_n]), bands[0][2]))
     for f0, f1, c in bands:
@@ -749,3 +750,8 @@ def strip_band_quads(s):
         l1, r1 = _interp(left, f1), _interp(right, f1)
         out.append(([l0, r0, r1, l1], c))
     return out
+
+
+def strip_band_quads_cmyk(s):
+    """Квады полосы с ЦВЕТОМ CMYK (s['bands_cmyk']) — для нативного CMYK-вывода."""
+    return strip_band_quads(s, key="bands_cmyk")
