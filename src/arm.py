@@ -7,6 +7,7 @@ import pymupdf
 import numpy as np
 import cv2
 import math
+from os import path as os_path                                       # резолв пути к шаблону руки от корня проекта
 from shapely.geometry import Polygon, box
 from shapely import affinity
 
@@ -69,6 +70,10 @@ def build_arm(cfg, hole_d=None):
     hole_d — диаметр отверстия (мм); None -> arm_hole_diameter_mm. При arm_hole_from_cut
     приходит ДЛИНА РЕЗА -> база/плечо подгоняются под π·hole_d (окружность отверстия)."""
     tpl = cfg.get("arm_template_pdf", "examples/arm_template.pdf")
+    if not os_path.isabs(tpl) and not os_path.exists(tpl):           # относит. путь + не найден у CWD -> от корня проекта
+        _root = os_path.dirname(os_path.dirname(os_path.abspath(__file__)))
+        if os_path.exists(os_path.join(_root, tpl)):
+            tpl = os_path.join(_root, tpl)
     hd = float(hole_d) if hole_d else cfg.get("arm_hole_diameter_mm", 250)
     s = hd / cfg.get("arm_template_hole_mm", 250)
     page = pymupdf.open(tpl)[0]
