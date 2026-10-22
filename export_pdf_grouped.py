@@ -192,7 +192,7 @@ def _bg_fill_colors(page, cfg):
     return cols
 
 
-def _pix_png_nobg(pix, bg_cols, tol=40, fill_mask=None, white_sum=720, only_gaps=False, max_gap_px=None):
+def _pix_png_nobg(pix, bg_cols, tol=40, fill_mask=None, white_sum=720, only_gaps=False, max_gap_px=None, no_seed_mask=None):
     """Убрать фон макета из растра. Цвет фона берём из вектора (bg_cols = _bg_fill_colors —
     большой прямоугольник нижнего слоя), но прозрачим ТОЛЬКО область этого цвета, СВЯЗАННУЮ С
     КРАЕМ растра (фон окружает фигуру снаружи). Карман того же цвета ВНУТРИ контура (напр. серые
@@ -228,6 +228,8 @@ def _pix_png_nobg(pix, bg_cols, tol=40, fill_mask=None, white_sum=720, only_gaps
             _n, lbl = cv2.connectedComponents(bgin.astype(np.uint8), connectivity=4)
             outside = (~inside).astype(np.uint8)
             adj = (cv2.dilate(outside, np.ones((3, 3), np.uint8)) > 0) & bgin   # bg у самой границы контура = затравки гапов
+            if no_seed_mask is not None:                            # не засеивать от ПРЯМЫХ линий реза тайлов (не силуэт):
+                adj = adj & ~no_seed_mask                           # иначе дырки букв, вскрытые резом, заливаются
             touch = np.unique(lbl[adj]); touch = touch[touch != 0]
             fill = np.isin(lbl, touch)                              # компоненты-гапы у внешнего контура (вся глубина клина)
             if max_gap_px is not None:                              # safeguard: не глубже max от границы (крупные внутр. зоны)
@@ -245,7 +247,7 @@ def _pix_png_nobg(pix, bg_cols, tol=40, fill_mask=None, white_sum=720, only_gaps
     return buf.getvalue()
 
 
-def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0, only_gaps=False):
+def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0, only_gaps=False, cut_x=()):
     """Текстура = РАСТР оригинального рендера макета КАК ЕСТЬ (идеальные цвета, градиенты,
     чёрная обводка/плашки — всё точно из макета), обрезанный по контуру детали через clipPath.
     Фон макета убирается универсально (_pix_png_nobg): цветной/серый фон -> прозрачный,
@@ -264,7 +266,16 @@ def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0, only_gaps=Fals
         fmask = np.zeros((pix.height, pix.width), np.uint8); cv2.fillPoly(fmask, [cp], 1)
     mm_per_px = (abs(x1 - x0) / pix.width) if pix.width else 1.0       # layout-мм на 1 px растра
     max_gap_px = max(2.0, _GAP_MM / (mm_per_px or 1.0))               # предельная ГЛУБИНА заливки гапа от границы (safeguard)
-    png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS, fill_mask=fmask, only_gaps=only_gaps, max_gap_px=max_gap_px)).decode()   # фон убрать + краевые гапы
+    no_seed = None
+    if cut_x and fmask is not None:                                   # НЕ засеивать заливку от прямых линий реза тайлов
+        import numpy as np, cv2
+        minx = min(x0, x1); wd = abs(x1 - x0) or 1.0
+        band = max(3, int(round(max_gap_px)))
+        no_seed = np.zeros((pix.height, pix.width), bool)
+        for cx in cut_x:
+            col = int(round((cx - minx) / wd * pix.width))
+            no_seed[:, max(0, col - band):min(pix.width, col + band + 1)] = True
+    png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS, fill_mask=fmask, only_gaps=only_gaps, max_gap_px=max_gap_px, no_seed_mask=no_seed)).decode()   # фон убрать + краевые гапы
     cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in contour.exterior.coords)
     return (f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'
             f'<image clip-path="url(#{cid})" x="{min(x0, x1):.2f}" y="{min(y0, y1):.2f}" '
@@ -847,9 +858,10 @@ def main():
                 sx = sorted((src_bbox[0] + (tb[0] - x0) / ssx, src_bbox[0] + (tb[2] - x0) / ssx))
                 sy = sorted((src_bbox[1] + (tb[1] - y0) / ssy, src_bbox[1] + (tb[3] - y0) / ssy))
                 _slice = (sx[0], sy[0], sx[1], sy[1])
+                _cuts = tuple(c for c, cond in ((bx0, k > 0), (bx1, k < len(tl) - 1)) if cond)   # внутр. рёбра = линии реза
                 tagged = [("colors", "\n".join(_design_vector(page, _slice, tf, tp, nextid())))]
-                if _FILL_GAPS:                                        # оверлей зазоров полосы ПОВЕРХ вектора
-                    tagged.append(("colors", _design_raster(page, _slice, tf, tp, nextid(), only_gaps=True)))
+                if _FILL_GAPS:                                        # оверлей зазоров полосы ПОВЕРХ вектора (не от линий реза)
+                    tagged.append(("colors", _design_raster(page, _slice, tf, tp, nextid(), only_gaps=True, cut_x=_cuts)))
                 tagged += [("contour", _poly(list(tp.exterior.coords), stroke="#000", sw=lw)),
                            ("seam", _poly(list(ts.exterior.coords), stroke="#000000", sw=lw)), _tile_seamlines]
             else:
