@@ -740,7 +740,10 @@ def main():
         tl = _vtiles(panel_poly, holst, seam_mm_v) if _split else None
         if not tl:                                                    # целиком
             if vector_tex:                                           # ВЕКТОР: оригинал макета (show_pdf_page) + анти-маска
-                lay.setdefault("_vec_tex", []).append((tuple(src_bbox), tf, panel_poly, 0.0))
+                x0, y0 = tf(src_bbox[0], src_bbox[1]); x1, y1 = tf(src_bbox[2], src_bbox[3])
+                tgt = (min(x0, x1) * MM2PT, min(y0, y1) * MM2PT, max(x0, x1) * MM2PT, max(y0, y1) * MM2PT)
+                cpts = [(px * MM2PT, py * MM2PT) for px, py in panel_poly.exterior.coords]
+                lay.setdefault("_vec_tex", []).append((tuple(src_bbox), tgt, cpts))
                 tagged = [("contour", _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw)),
                           ("seam", _poly(list(panel_seam.exterior.coords), stroke="#000000", sw=lw)),
                           ("seamlines", _arc_paths(arcs, panel_poly, f"seam_{prefix}"))]
@@ -757,10 +760,23 @@ def main():
             if cursor is None:
                 cursor = ts.bounds[0]
             dx = cursor - ts.bounds[0]                                # сдвиг так, чтобы полосы легли В РЯД с зазором
-            tagged = [("colors", _design_raster(page, src_bbox, tf, tp, nextid())),
-                      ("contour", _poly(list(tp.exterior.coords), stroke="#000", sw=lw)),
-                      ("seam", _poly(list(ts.exterior.coords), stroke="#000000", sw=lw)),
-                      ("seamlines", _arc_paths(_clip_arcs_x(arcs, bx0, bx1), tp, f"seam_{nm}"))]
+            _tile_seamlines = ("seamlines", _arc_paths(_clip_arcs_x(arcs, bx0, bx1), tp, f"seam_{nm}"))
+            if vector_tex:                                            # ВЕКТОР-срез полосы: src-зона через ИНВЕРСИЮ tf
+                x0, y0 = tf(src_bbox[0], src_bbox[1]); x1, y1 = tf(src_bbox[2], src_bbox[3])
+                ssx = (x1 - x0) / ((src_bbox[2] - src_bbox[0]) or 1.0); ssy = (y1 - y0) / ((src_bbox[3] - src_bbox[1]) or 1.0)
+                tb = tp.bounds
+                sx = sorted((src_bbox[0] + (tb[0] - x0) / ssx, src_bbox[0] + (tb[2] - x0) / ssx))
+                sy = sorted((src_bbox[1] + (tb[1] - y0) / ssy, src_bbox[1] + (tb[3] - y0) / ssy))
+                lay.setdefault("_vec_tex", []).append((
+                    (sx[0], sy[0], sx[1], sy[1]),
+                    ((tb[0] + dx) * MM2PT, tb[1] * MM2PT, (tb[2] + dx) * MM2PT, tb[3] * MM2PT),
+                    [((px + dx) * MM2PT, py * MM2PT) for px, py in tp.exterior.coords]))
+                tagged = [("contour", _poly(list(tp.exterior.coords), stroke="#000", sw=lw)),
+                          ("seam", _poly(list(ts.exterior.coords), stroke="#000000", sw=lw)), _tile_seamlines]
+            else:
+                tagged = [("colors", _design_raster(page, src_bbox, tf, tp, nextid())),
+                          ("contour", _poly(list(tp.exterior.coords), stroke="#000", sw=lw)),
+                          ("seam", _poly(list(ts.exterior.coords), stroke="#000000", sw=lw)), _tile_seamlines]
             body = _emit_layers(tagged, colors_top)                    # цветовые маркеры в припуске
             if abs(dx) > 1e-6:                                        # та же деталь, просто сдвинута РЯДОМ
                 body = [f'<g transform="translate({dx:.3f},0)">'] + body + ["</g>"]
@@ -1043,16 +1059,13 @@ def main():
 
     master = pymupdf.open(); mpage = master.new_page(width=W * MM2PT, height=H * MM2PT)
     mpage.draw_rect(mpage.rect, color=None, fill=(1, 1, 1))
-    for (sbb, tf, cont, dx) in lay.get("_vec_tex", []):               # ВЕКТОР-текстура переда/зада (оригинал макета, НЕ растр)
-        x0, y0 = tf(sbb[0], sbb[1]); x1, y1 = tf(sbb[2], sbb[3])
-        tx0, tx1 = min(x0, x1) + dx, max(x0, x1) + dx; ty0, ty1 = min(y0, y1), max(y0, y1)
-        trect = pymupdf.Rect(tx0 * MM2PT, ty0 * MM2PT, tx1 * MM2PT, ty1 * MM2PT)
+    for (src_r, tgt_r, cont_pts) in lay.get("_vec_tex", []):          # ВЕКТОР-текстура переда/зада (оригинал макета, НЕ растр)
         try:
-            mpage.show_pdf_page(trect, page.parent, page.number, clip=pymupdf.Rect(*sbb))
+            mpage.show_pdf_page(pymupdf.Rect(*tgt_r), page.parent, page.number, clip=pymupdf.Rect(*src_r))
         except Exception as _e:
             print("   вектор-текстура не вставлена:", _e); continue
-        cpts = [pymupdf.Point((px + dx) * MM2PT, py * MM2PT) for px, py in cont.exterior.coords]   # анти-маска: bbox минус контур -> белым
-        shp = mpage.new_shape(); shp.draw_rect(trect); shp.draw_polyline(cpts)
+        shp = mpage.new_shape(); shp.draw_rect(pymupdf.Rect(*tgt_r))   # анти-маска: bbox минус контур -> белым (прячет вектор за контуром)
+        shp.draw_polyline([pymupdf.Point(*p) for p in cont_pts])
         shp.finish(fill=(1, 1, 1), color=None, even_odd=True, closePath=True); shp.commit()
     if cfg.get("manual_paint") and cfg.get("gusset_cmyk", True):      # НАТИВНЫЙ CMYK-гассет (точный цвет макета) ПОД контуром
         from side_color import strip_band_quads_cmyk
