@@ -170,6 +170,7 @@ def _stroke_paths(geom, stroke, sw):
 
 _BG_COLS = []                                                         # цвета фоновых прямоугольников макета (заполняется в main)
 _FILL_GAPS = False                                                    # заполнять белые зазоры по краю переда/зада (из cfg)
+_GAP_MM = 6.0                                                         # ширина каймы заливки зазоров, мм (из cfg gap_fill_max_mm)
 _VECTOR_TEX = True                                                    # текстуры ВЕКТОРОМ (не растр) — из cfg vector_texture
 
 
@@ -191,7 +192,7 @@ def _bg_fill_colors(page, cfg):
     return cols
 
 
-def _pix_png_nobg(pix, bg_cols, tol=40, fill_mask=None, white_sum=720, only_gaps=False):
+def _pix_png_nobg(pix, bg_cols, tol=40, fill_mask=None, white_sum=720, only_gaps=False, max_gap_px=None):
     """Убрать фон макета из растра. Цвет фона берём из вектора (bg_cols = _bg_fill_colors —
     большой прямоугольник нижнего слоя), но прозрачим ТОЛЬКО область этого цвета, СВЯЗАННУЮ С
     КРАЕМ растра (фон окружает фигуру снаружи). Карман того же цвета ВНУТРИ контура (напр. серые
@@ -224,9 +225,12 @@ def _pix_png_nobg(pix, bg_cols, tol=40, fill_mask=None, white_sum=720, only_gaps
             bc = np.isin(lbl, list(border)) if border else np.zeros((H, W), bool)
             fill = (fill_mask > 0) & bg & bc                         # внутри контура ∧ фон ∧ связан с внешним краем
             if fill.any():
-                idx = ndimage.distance_transform_edt(bg, return_indices=True)[1]
-                img[fill, :3] = img[idx[0][fill], idx[1][fill], :3]  # ближайший дизайн-пиксель
-                img[fill, 3] = 255
+                dist, idx = ndimage.distance_transform_edt(bg, return_distances=True, return_indices=True)
+                if max_gap_px is not None:                           # заливать ТОЛЬКО тонкую кайму у края дизайна
+                    fill = fill & (dist <= float(max_gap_px))        # внутр. зоны (между ног, фон вывески) далеко -> не трогаем
+                if fill.any():
+                    img[fill, :3] = img[idx[0][fill], idx[1][fill], :3]  # ближайший дизайн-пиксель
+                    img[fill, 3] = 255
             if only_gaps:                                           # ОВЕРЛЕЙ зазоров: оставить ТОЛЬКО залитые щели, остальное прозрачно
                 img[~fill, 3] = 0
         elif only_gaps:
@@ -252,7 +256,9 @@ def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0, only_gaps=Fals
         cp = np.array([((px - minx) / wd * pix.width, (py - miny) / ht * pix.height)
                        for px, py in contour.exterior.coords], np.int32)
         fmask = np.zeros((pix.height, pix.width), np.uint8); cv2.fillPoly(fmask, [cp], 1)
-    png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS, fill_mask=fmask, only_gaps=only_gaps)).decode()   # фон убрать + зазоры
+    mm_per_px = (abs(x1 - x0) / pix.width) if pix.width else 1.0       # layout-мм на 1 px растра
+    max_gap_px = max(2.0, _GAP_MM / (mm_per_px or 1.0))               # кайма заливки = _GAP_MM мм (не затирать внутр. зоны)
+    png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS, fill_mask=fmask, only_gaps=only_gaps, max_gap_px=max_gap_px)).decode()   # фон убрать + зазоры КАЙМОЙ
     cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in contour.exterior.coords)
     return (f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'
             f'<image clip-path="url(#{cid})" x="{min(x0, x1):.2f}" y="{min(y0, y1):.2f}" '
@@ -612,9 +618,10 @@ def main():
     cfg = yaml.safe_load(open(args.config, encoding="utf-8"))
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     page = pymupdf.open(args.input_pdf)[0]
-    global _BG_COLS, _FILL_GAPS, _VECTOR_TEX
+    global _BG_COLS, _FILL_GAPS, _GAP_MM, _VECTOR_TEX
     _BG_COLS = _bg_fill_colors(page, cfg)                             # цвета фона из вектора (нижний слой-прямоугольник)
     _FILL_GAPS = bool(cfg.get("fill_edge_gaps"))                      # заполнять белые зазоры по краю переда/зада
+    _GAP_MM = float(cfg.get("gap_fill_max_mm", 6.0))                 # ширина каймы заливки зазоров (внутр. зоны не затирать)
     _VECTOR_TEX = bool(cfg.get("vector_texture", True))              # текстуры (кисть) ВЕКТОРОМ, не растр
 
     lay, fig, contour_mm, g, arm_pts, seam_mm = build_layout(page, cfg)
