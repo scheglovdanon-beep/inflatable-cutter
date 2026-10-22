@@ -16,6 +16,16 @@ from export_svg import build_layout, _design_group, _poly, HEX, _tex_tf         
 MM2PT = 72.0 / 25.4
 
 
+def _hex2cmyk(h):
+    """#rrggbb -> (c,m,y,k) доли (наивно) для нативного CMYK-вывода ключей."""
+    h = h.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+    k = 1.0 - max(r, g, b)
+    if k >= 0.999:
+        return (0.0, 0.0, 0.0, 1.0)
+    return ((1 - r - k) / (1 - k), (1 - g - k) / (1 - k), (1 - b - k) / (1 - k), k)
+
+
 def _circle(cx, cy, r, stroke, sw):
     return f'<circle cx="{cx:.3f}" cy="{cy:.3f}" r="{r:.3f}" fill="none" stroke="{stroke}" stroke-width="{sw:.3f}"/>'
 
@@ -671,6 +681,7 @@ def main():
     # Дуги лежат В КОЛЬЦЕ ПРИПУСКА (не заходят за контур). Маркер «рука здесь» оставляем всегда.
     seam_lines = cfg.get("seam_color_lines", True)
     seam_bands = cfg.get("seam_color_bands", False)
+    seam_keys_cmyk = cfg.get("seam_keys_cmyk", True)                  # ключи-подсветки швов НАТИВНЫМ CMYK (не RGB через SVG)
     # Ключи-подсветки швов на ВСЕХ деталях: один цвет на ОБОИХ сшиваемых рёбрах (с кем сшивается).
     _skey = {}; _skctr = [40]                                         # стабильные тусклые цвета по имени стыка
     def seamcol(nm):
@@ -721,7 +732,10 @@ def main():
     def _arc_paths(arcs, panel, gid):
         pp = _prep2(panel); out = [f'<g id="{gid}">']
         for col, pts in arcs:
-            d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _offset_out(pts, pp, off))
+            opts = _offset_out(pts, pp, off)
+            if seam_keys_cmyk:                                        # ключи рисуем НАТИВНЫМ CMYK на master (не SVG RGB)
+                lay.setdefault("_key_arcs", []).append((opts, col)); continue
+            d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in opts)
             out.append(f'<path d="{d}" fill="none" stroke="{col}" stroke-width="{sw_seam}" stroke-linecap="round"/>')
         out.append("</g>")
         return "\n".join(out)
@@ -902,19 +916,21 @@ def main():
         else:
             le, re = _edges_top_down(list(s["poly"]), s.get("waist") is not None)
         keycol = HEX(_palette(s["i"]))
+        def _emit_key(pts, col):                                       # ключ: CMYK на master (сбор) ИЛИ SVG RGB
+            if seam_keys_cmyk:
+                lay.setdefault("_key_arcs", []).append((pts, col)); return
+            d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in pts)
+            tagged.append(("seamlines", f'<path d="{d}" fill="none" stroke="{col}" stroke-width="{sw_seam}" stroke-linecap="round"/>'))
         if seam_bands:                                                 # ПО ЦВЕТАМ: ключ зоны на под-участке ОБОИХ рёбер
             for edge in (le, re):
                 for j, (f0, f1, _rgb) in enumerate(s.get("bands", []) or []):
                     sub = _edge_sub(edge, f0, f1)
                     if len(sub) < 2:
                         continue
-                    d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(sub, cen, off))
-                    tagged.append(("seamlines", f'<path d="{d}" fill="none" stroke="{band_keys.get((s["i"], j), keycol)}" '
-                                   f'stroke-width="{sw_seam}" stroke-linecap="round"/>'))
+                    _emit_key(_edge_out(sub, cen, off), band_keys.get((s["i"], j), keycol))
         elif seam_lines:                                               # ПО ДЕТАЛЯМ: один ключ вдоль рёбер (seam_color_lines)
             for edge in (le, re):
-                d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in _edge_out(edge, cen, off))
-                tagged.append(("seamlines", f'<path d="{d}" fill="none" stroke="{keycol}" stroke-width="{sw_seam}" stroke-linecap="round"/>'))
+                _emit_key(_edge_out(edge, cen, off), keycol)
         tagged.append(("contour", _poly(list(s["poly"]), stroke="#000", sw=lw)))   # контур детали — чёрный
         if s.get("seam"):
             tagged.append(("seam", _poly(list(s["seam"].exterior.coords), stroke="#000000", sw=lw)))
@@ -1110,6 +1126,15 @@ def main():
         ocg = master.add_ocg(name)                                    # слой-группа детали
         mpage.show_pdf_page(mpage.rect, src, 0, oc=ocg)
         src.close()
+    if lay.get("_key_arcs"):                                          # КЛЮЧИ ШВОВ — нативный CMYK (поверх, в кольце припуска)
+        kocg = master.add_ocg("kljuchi_cmyk")
+        for (pts, col) in lay["_key_arcs"]:
+            if len(pts) < 2:
+                continue
+            shp = mpage.new_shape()
+            shp.draw_polyline([pymupdf.Point(x * MM2PT, y * MM2PT) for x, y in pts])
+            shp.finish(color=_hex2cmyk(col), width=sw_seam * MM2PT, closePath=False, lineCap=1, oc=kocg)
+            shp.commit()
     master.save(args.out, garbage=3, deflate=True)
     sz = os.path.getsize(args.out) / 1024
     print(f"saved {args.out} | групп: {len(pieces)} | лист {W:.0f}x{H:.0f} мм | {sz:.0f} KB")
