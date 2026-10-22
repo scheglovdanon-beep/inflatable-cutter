@@ -5,7 +5,7 @@ PDF с ГРУППАМИ по деталям для CorelDRAW: каждая де�
 
 Запуск: python export_pdf_grouped.py examples/arm_sep.pdf --config config.yaml -o out/layout_grouped.pdf
 """
-import argparse, os, sys
+import argparse, os, re, sys
 import pymupdf, yaml, numpy as np, cairosvg
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
@@ -160,6 +160,7 @@ def _stroke_paths(geom, stroke, sw):
 
 _BG_COLS = []                                                         # цвета фоновых прямоугольников макета (заполняется в main)
 _FILL_GAPS = False                                                    # заполнять белые зазоры по краю переда/зада (из cfg)
+_VECTOR_TEX = True                                                    # текстуры ВЕКТОРОМ (не растр) — из cfg vector_texture
 
 
 def _bg_fill_colors(page, cfg):
@@ -376,23 +377,33 @@ def _design_clipped(dds, tf, f_mm, contour, title):
 
 
 def _hand_tex(page, poly, src, cid, zoom=6.0):
-    """Текстура кисти = РАСТР оригинала (идеальные цвета вкл. градиенты), размещённый аффином
-    src(pt)->poly через SVG matrix (корректно и для зеркальной «правой стороны»), клип по
-    контуру кисти. Вектор-пересборка теряла градиенты (ладонь выходила серой/без контура)."""
-    import base64
+    """Текстура кисти, аффином src(pt)->poly + клип по контуру. ВЕКТОР (_VECTOR_TEX): оригинал
+    макета как ВЕКТОР (get_svg_image куска) — не пикселит, выделяется в Corel; градиенты макета
+    проброшены как есть. Иначе: РАСТР (старый путь, get_pixmap)."""
     s = np.asarray(src, float); dst = np.array(poly.exterior.coords[:-1])
     if len(s) != len(dst):
         return []
     Mx = np.hstack([s, np.ones((len(s), 1))])
     ax = np.linalg.lstsq(Mx, dst[:, 0], rcond=None)[0]; ay = np.linalg.lstsq(Mx, dst[:, 1], rcond=None)[0]
     x0, y0 = float(s[:, 0].min()), float(s[:, 1].min()); x1, y1 = float(s[:, 0].max()), float(s[:, 1].max())
+    cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in poly.exterior.coords)
+    if _VECTOR_TEX:                                                   # ВЕКТОР: кусок макета -> SVG, affine (macet->poly) + клип
+        tmp = pymupdf.open(); tp = tmp.new_page(width=max(1.0, x1 - x0), height=max(1.0, y1 - y0))
+        tp.show_pdf_page(tp.rect, page.parent, page.number, clip=pymupdf.Rect(x0, y0, x1, y1))
+        inner = tp.get_svg_image(text_as_path=True); tmp.close()
+        m = re.search(r"<svg[^>]*>(.*)</svg>", inner, re.S)
+        content = m.group(1) if m else ""
+        mat = f"matrix({ax[0]:.6f},{ay[0]:.6f},{ax[1]:.6f},{ay[1]:.6f},{ax[2]:.3f},{ay[2]:.3f})"  # (sx,sy)->poly
+        return [f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>',
+                f'<g clip-path="url(#{cid})"><g transform="{mat} translate({x0:.3f},{y0:.3f})">',   # temp(0..w)->macet(+x0,y0)->poly
+                content, "</g></g>"]
+    import base64                                                     # РАСТР (старый путь)
     pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=pymupdf.Rect(x0, y0, x1, y1), alpha=True)
     png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS)).decode()
     a = ax[0] / zoom; c = ax[1] / zoom; e = ax[0] * x0 + ax[1] * y0 + ax[2]   # пиксель -> src -> аффин(poly)
     b = ay[0] / zoom; d = ay[1] / zoom; ff = ay[0] * x0 + ay[1] * y0 + ay[2]
-    cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in poly.exterior.coords)
-    return [f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'      # клип на ГРУППЕ (мм-простр.),
-            f'<g clip-path="url(#{cid})">'                                       # трансформ image — ВНУТРИ
+    return [f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'
+            f'<g clip-path="url(#{cid})">'
             f'<image width="{pix.width}" height="{pix.height}" '
             f'transform="matrix({a:.5f},{b:.5f},{c:.5f},{d:.5f},{e:.3f},{ff:.3f})" '
             f'preserveAspectRatio="none" xlink:href="data:image/png;base64,{png}"/></g>']
@@ -569,9 +580,10 @@ def main():
     cfg = yaml.safe_load(open(args.config, encoding="utf-8"))
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     page = pymupdf.open(args.input_pdf)[0]
-    global _BG_COLS, _FILL_GAPS
+    global _BG_COLS, _FILL_GAPS, _VECTOR_TEX
     _BG_COLS = _bg_fill_colors(page, cfg)                             # цвета фона из вектора (нижний слой-прямоугольник)
     _FILL_GAPS = bool(cfg.get("fill_edge_gaps"))                      # заполнять белые зазоры по краю переда/зада
+    _VECTOR_TEX = bool(cfg.get("vector_texture", True))              # текстуры (кисть) ВЕКТОРОМ, не растр
 
     lay, fig, contour_mm, g, arm_pts, seam_mm = build_layout(page, cfg)
     lw = cfg.get("line_width_mm", 0.2); f_mm = fig.s * PT2MM
