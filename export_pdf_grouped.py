@@ -1140,24 +1140,42 @@ def main():
     mpage.draw_rect(mpage.rect, color=None, fill=(1, 1, 1))
     if cfg.get("manual_paint") and cfg.get("gusset_cmyk", True):      # НАТИВНЫЙ CMYK-гассет (точный цвет макета) ПОД контуром
         from side_color import strip_band_quads_cmyk
+        from shapely.geometry import Polygon as _Pl
         roll_place = lay.get("_roll_place", {})                       # трансформы укладки деталей в рулон (из _rollpack_svg)
-        def _draw_quad(quad, cmyk, tfpt):
-            pts = [pymupdf.Point(*tfpt(x, y)) for x, y in quad]
-            shp = mpage.new_shape(); shp.draw_polyline(pts + [pts[0]])
+        allow = float(cfg.get("seam_allowance_mm", 10)) + 3.0        # расширить цвет НА припуск (до линии реза), +3мм запас
+        def _coords(geom):                                           # список контуров (Multi)Polygon
+            if geom.is_empty: return []
+            return [list(g.exterior.coords) for g in (geom.geoms if geom.geom_type == "MultiPolygon" else [geom])]
+        def _draw_poly(pts, cmyk, tfpt):
+            P = [pymupdf.Point(*tfpt(x, y)) for x, y in pts]
+            if len(P) < 3: return
+            shp = mpage.new_shape(); shp.draw_polyline(P + [P[0]])
             shp.finish(fill=tuple(float(v) for v in cmyk), color=None, closePath=True); shp.commit()
         for s in lay.get("strips", []):
             if not s.get("bands_cmyk"):
                 continue
             quads = list(strip_band_quads_cmyk(s))
-            for quad, cmyk in quads:                                  # 1) на фигуре (верх)
-                _draw_quad(quad, cmyk, lambda x, y: (x * MM2PT, y * MM2PT))
-            rp = roll_place.get(f"bokovina_{s['i']}")                 # 2) в рулоне: та же деталь, трансформ укладки + y_off
+            seam_poly = s.get("seam")                                 # линия реза (контур+припуск) — до неё тянем цвет
+            exp = []                                                  # расширенные квады (заполняют припуск, вкл. углы)
+            for quad, cmyk in quads:
+                g = _Pl(quad)
+                if not g.is_valid or g.is_empty:
+                    exp.append(([quad], cmyk)); continue
+                gg = g.buffer(allow, join_style=2)                   # наружу на припуск
+                if seam_poly is not None:
+                    gg = gg.intersection(seam_poly)                  # обрезать по линии реза (не вылезать за контур)
+                exp.append((_coords(gg), cmyk))
+            def _paint(tfpt):
+                for rings, cmyk in exp:                              # проход 1: расширенные -> цвет до реза (припуск, углы)
+                    for ring in rings: _draw_poly(ring, cmyk, tfpt)
+                for quad, cmyk in quads:                             # проход 2: оригинал -> точные границы зон внутри
+                    _draw_poly(quad, cmyk, tfpt)
+            _paint(lambda x, y: (x * MM2PT, y * MM2PT))              # 1) на фигуре (верх)
+            rp = roll_place.get(f"bokovina_{s['i']}")                # 2) в рулоне: та же деталь, трансформ укладки + y_off
             if rp:
                 (a, b, d, e, xo, yo), yoff = rp
-                def _rtf(x, y, a=a, b=b, d=d, e=e, xo=xo, yo=yo, yoff=yoff):
-                    return ((a * x + b * y + xo) * MM2PT, (d * x + e * y + yo + yoff) * MM2PT)
-                for quad, cmyk in quads:
-                    _draw_quad(quad, cmyk, _rtf)
+                _paint(lambda x, y, a=a, b=b, d=d, e=e, xo=xo, yo=yo, yoff=yoff:
+                       ((a * x + b * y + xo) * MM2PT, (d * x + e * y + yo + yoff) * MM2PT))
     # каждая деталь -> свой слой (PDF OCG) с именем детали: Corel импортирует деталь ЦЕЛИКОМ
     # (контур+заливка+текстура+припуск на одном слое), её можно переносить как единое целое.
     for name, body in pieces:
