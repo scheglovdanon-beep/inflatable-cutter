@@ -142,7 +142,11 @@ def build_layout(page, cfg):
         from arm import cut_details
         fig.contour_pt, cut_dets = cut_details(page, fig.contour_pt, cfg, strict=True)
 
-    contour_mm = smooth_front(contour_to_mm(fig), cfg)
+    _strict_mm = None
+    if cfg.get("contour_keep_sharp_pts"):                            # РУЧНОЕ формирование: зоны «резкий угол» -> строгий контур
+        from sides import strict_contour_mm
+        _strict_mm = strict_contour_mm(fig, cfg)
+    contour_mm = smooth_front(contour_to_mm(fig), cfg, strict=_strict_mm)
     g = build_gusset(contour_mm, cfg)
     # 1 РУКА + РЕЗ ПО 1 ТОЧКЕ: линия реза (горизонталь на уровне верха реза). Боковину, которая
     # ПЕРЕСЕКАЕТ линию, РЕЖЕМ на 2 детали по линии. Выше линии -> вся под 1/ratio; ниже -> узкая

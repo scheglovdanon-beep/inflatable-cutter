@@ -349,26 +349,45 @@ def contour_to_mm(fig):
     return affinity.scale(fig.contour_pt, f, f, origin=(0, 0))
 
 
-def smooth_front(contour_mm, cfg):
-    """Сгладить передний контур ТОЛЬКО в зигзагообразных частях (волосы, мелкие выступы,
-    бугры), не обрезая макет и не трогая крупные плавные части.
-    Логика: морфологическое ЗАМЫКАНИЕ (closing) радиусом front_smooth_mm — заполняет впадины
-    между выступами плавной внешней дугой; closing расширяющая, поэтому ВЕСЬ исходный контур
-    (и весь макет) гарантированно остаётся внутри. Крупные вогнутости (> ~2r, талия и т.п.)
-    и выпуклости сохраняются как обычная обводка. 0 = без сглаживания."""
-    r = cfg.get("front_smooth_mm", 70)
-    if not r or r <= 0:
-        return contour_mm
+def strict_contour_mm(fig, cfg):
+    """СТРОГИЙ контур фигуры (как «формирование контура» в Corel по сгруппированным элементам):
+    union ВСЕХ заливок -> внешний силуэт (внутренние дыры залиты, ВНЕШНИЕ вырезы сохранены резко).
+    Тонкие внутр. щели дизайна (линии между заливками) соединяются малым буфером contour_strict_merge_mm,
+    реальные вырезы — не перемыкаются. Эталон для подсветки сглаживания. None если нет заливок."""
+    from pieces import _poly_of
+    from shapely.ops import unary_union as _uu
+    from shapely.geometry import Polygon as _Pl
+    polys = [p for p in (_poly_of(d) for d in fig.drawings if d.get("fill") is not None) if p]
+    if not polys:
+        return None
+    f = fig.s * PT2MM
+    u = affinity.scale(_uu(polys), f, f, origin=(0, 0)).buffer(0)
+    K = float(cfg.get("contour_strict_merge_mm", 6.0))
+    c = u.buffer(K).buffer(-K)                                        # соединить тонкие внутр. щели дизайна
+    if c.geom_type == "MultiPolygon":
+        c = max(c.geoms, key=lambda g: g.area)
+    return _Pl(c.exterior).buffer(0)                                 # залить внутр. дыры -> внешний силуэт
+
+
+def _closed(contour_mm, r):
     p = contour_mm.buffer(r, join_style=1).buffer(-r, join_style=1)   # closing (round): впадины -> плавная дуга
     if p.geom_type == "MultiPolygon":
         p = max(p.geoms, key=lambda g: g.area)
-    p = p.buffer(0)
-    pts = cfg.get("contour_keep_sharp_pts")                           # РУЧНОЕ формирование контура: точки «НЕ сглаживать»
-    if pts:                                                           # closing только ДОБАВЛЯет материал (залитые впадины) —
-        from shapely.geometry import Point as _Pt                    # в кликнутых пятнах вычитаем его -> резкий угол как в макете
+    return p.buffer(0)
+
+
+def smooth_front(contour_mm, cfg, strict=None):
+    """Сгладить передний контур (морф. замыкание front_smooth_mm). РУЧНОЕ формирование: в кликнутых
+    зонах (contour_keep_sharp_pts) возвращаем СТРОГИЙ контур (резкий вырез как в фигуре) — вычитаем
+    выпуклость (сглаж − строгий) в этих зонах. strict=None -> только сглаживание (старые вызовы)."""
+    r = cfg.get("front_smooth_mm", 70)
+    p = _closed(contour_mm, r) if (r and r > 0) else contour_mm
+    pts = cfg.get("contour_keep_sharp_pts")
+    if pts and strict is not None:
+        from shapely.geometry import Point as _Pt
         from shapely.ops import unary_union as _uu
         tol = cfg.get("contour_keep_sharp_tol_mm", 60.0)
-        keep = [g for g in smooth_regions(contour_mm, cfg)
+        keep = [g for g in smooth_regions(contour_mm, cfg, strict)
                 if any(g.distance(_Pt(x, y)) <= tol for x, y in pts)]
         if keep:
             p = p.difference(_uu(keep)).buffer(0)
@@ -377,17 +396,15 @@ def smooth_front(contour_mm, cfg):
     return p
 
 
-def smooth_regions(contour_mm, cfg):
-    """Связные пятна материала, ДОБАВЛЕННОГО сглаживанием (сглаженный − сырой) = скруглённые впадины.
-    Для ручного формирования контура: их подсвечиваем и даём кликать (клик -> не сглаживать там)."""
+def smooth_regions(contour_mm, cfg, strict=None):
+    """Области, где СГЛАЖЕННЫЙ контур выходит за СТРОГИЙ (внешний силуэт фигуры) = выпуклости
+    сглаживания/замыкания (целые вырезы, а не слайверы). Для ручного формирования: подсвечиваем и
+    даём кликать. strict=None -> фолбэк: разница с входным контуром (старое ~slivers)."""
     r = cfg.get("front_smooth_mm", 70)
-    if not r or r <= 0:
-        return []
-    p = contour_mm.buffer(r, join_style=1).buffer(-r, join_style=1)
-    if p.geom_type == "MultiPolygon":
-        p = max(p.geoms, key=lambda g: g.area)
-    added = p.buffer(0).difference(contour_mm.buffer(0))
-    min_area = cfg.get("contour_smooth_region_min_mm2", 400.0)        # отсечь мелкие артефакты (мм²)
+    p = _closed(contour_mm, r) if (r and r > 0) else contour_mm.buffer(0)
+    ref = (strict if strict is not None else contour_mm).buffer(0)
+    added = p.difference(ref)
+    min_area = cfg.get("contour_smooth_region_min_mm2", 500.0)        # отсечь мелкие артефакты (мм²)
     geoms = added.geoms if added.geom_type == "MultiPolygon" else ([added] if not added.is_empty else [])
     return [g for g in geoms if g.area >= min_area]
 

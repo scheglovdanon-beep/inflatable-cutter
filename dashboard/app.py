@@ -722,7 +722,7 @@ def contour_regions():
     try:
         import io
         from PIL import Image, ImageDraw
-        from sides import get_front_figure, contour_to_mm, smooth_front, smooth_regions, PT2MM
+        from sides import get_front_figure, contour_to_mm, smooth_front, smooth_regions, strict_contour_mm, PT2MM
         from export_pdf_grouped import _bg_fill_colors, _pix_png_nobg
         _co = data.get("clip_outline")
         arms = _fill_tips(d, size, data.get("arms", []), clip_outline=_co)   # руки заданы (этап ПОСЛЕ реза руки)
@@ -739,7 +739,8 @@ def contour_regions():
                 fig.contour_pt, _ = cut_waving_arms(page, fig.contour_pt, cfg, strict=True)
             except Exception:
                 pass
-        raw = contour_to_mm(fig); sm = smooth_front(raw, cfg); regs = smooth_regions(raw, cfg)
+        strict = strict_contour_mm(fig, cfg)                          # СТРОГИЙ контур (внешний силуэт) — эталон
+        raw = contour_to_mm(fig); sm = smooth_front(raw, cfg, strict=strict); regs = smooth_regions(raw, cfg, strict)
         fmm = fig.s * PT2MM
         bx0, by0, bx1, by1 = sm.bounds; mg = 30.0
         sc = 1000.0 / max(bx1 - bx0, by1 - by0)
