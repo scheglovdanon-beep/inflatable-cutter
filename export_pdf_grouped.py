@@ -599,6 +599,7 @@ def _rollpack_svg(parts, roll_h, gap, lay, y_off=0.0, suffix="_печать", in
             continue
         a, b, d, e, xo, yo = M                                         # shapely affine -> SVG matrix(a,d,b,e,e_x,f_y)
         tf = f'matrix({a:.6f},{d:.6f},{b:.6f},{e:.6f},{xo:.3f},{yo:.3f})'
+        lay.setdefault("_roll_place", {})[name] = (M, y_off)           # трансформ укладки детали (для master-CMYK гассета в рулоне)
         out.append((name + suffix, [f'<g transform="{gy}{tf}">'] + body + ["</g>"]))
     W = nested_w + gap
     if inst is not None and inst_bbox is not None:                     # инструкция — в конце рулона, без поворота
@@ -1134,15 +1135,24 @@ def main():
     mpage.draw_rect(mpage.rect, color=None, fill=(1, 1, 1))
     if cfg.get("manual_paint") and cfg.get("gusset_cmyk", True):      # НАТИВНЫЙ CMYK-гассет (точный цвет макета) ПОД контуром
         from side_color import strip_band_quads_cmyk
+        roll_place = lay.get("_roll_place", {})                       # трансформы укладки деталей в рулон (из _rollpack_svg)
+        def _draw_quad(quad, cmyk, tfpt):
+            pts = [pymupdf.Point(*tfpt(x, y)) for x, y in quad]
+            shp = mpage.new_shape(); shp.draw_polyline(pts + [pts[0]])
+            shp.finish(fill=tuple(float(v) for v in cmyk), color=None, closePath=True); shp.commit()
         for s in lay.get("strips", []):
             if not s.get("bands_cmyk"):
                 continue
-            for quad, cmyk in strip_band_quads_cmyk(s):
-                pts = [pymupdf.Point(x * MM2PT, y * MM2PT) for x, y in quad]
-                shp = mpage.new_shape()
-                shp.draw_polyline(pts + [pts[0]])
-                shp.finish(fill=tuple(float(v) for v in cmyk), color=None, closePath=True)
-                shp.commit()
+            quads = list(strip_band_quads_cmyk(s))
+            for quad, cmyk in quads:                                  # 1) на фигуре (верх)
+                _draw_quad(quad, cmyk, lambda x, y: (x * MM2PT, y * MM2PT))
+            rp = roll_place.get(f"bokovina_{s['i']}")                 # 2) в рулоне: та же деталь, трансформ укладки + y_off
+            if rp:
+                (a, b, d, e, xo, yo), yoff = rp
+                def _rtf(x, y, a=a, b=b, d=d, e=e, xo=xo, yo=yo, yoff=yoff):
+                    return ((a * x + b * y + xo) * MM2PT, (d * x + e * y + yo + yoff) * MM2PT)
+                for quad, cmyk in quads:
+                    _draw_quad(quad, cmyk, _rtf)
     # каждая деталь -> свой слой (PDF OCG) с именем детали: Corel импортирует деталь ЦЕЛИКОМ
     # (контур+заливка+текстура+припуск на одном слое), её можно переносить как единое целое.
     for name, body in pieces:
