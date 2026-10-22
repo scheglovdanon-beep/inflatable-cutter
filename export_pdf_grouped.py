@@ -733,14 +733,22 @@ def main():
                 out.append((col, run))
         return out
 
+    vector_tex = cfg.get("vector_texture", True)                      # перёд/зад ВЕКТОРОМ (не растр) — не пикселит, выделяется
+
     def _add_panel(prefix, panel_poly, panel_seam, src_bbox, tf, arcs):
         """Добавить деталь переда/зада в pieces. Шире холста -> N полос РЯДОМ (зазор tgap), иначе целиком."""
         tl = _vtiles(panel_poly, holst, seam_mm_v) if _split else None
         if not tl:                                                    # целиком
-            tagged = [("colors", _design_raster(page, src_bbox, tf, panel_poly, nextid())),
-                      ("contour", _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw)),
-                      ("seam", _poly(list(panel_seam.exterior.coords), stroke="#000000", sw=lw)),
-                      ("seamlines", _arc_paths(arcs, panel_poly, f"seam_{prefix}"))]
+            if vector_tex:                                           # ВЕКТОР: оригинал макета (show_pdf_page) + анти-маска
+                lay.setdefault("_vec_tex", []).append((tuple(src_bbox), tf, panel_poly, 0.0))
+                tagged = [("contour", _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw)),
+                          ("seam", _poly(list(panel_seam.exterior.coords), stroke="#000000", sw=lw)),
+                          ("seamlines", _arc_paths(arcs, panel_poly, f"seam_{prefix}"))]
+            else:                                                    # РАСТР (старый путь)
+                tagged = [("colors", _design_raster(page, src_bbox, tf, panel_poly, nextid())),
+                          ("contour", _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw)),
+                          ("seam", _poly(list(panel_seam.exterior.coords), stroke="#000000", sw=lw)),
+                          ("seamlines", _arc_paths(arcs, panel_poly, f"seam_{prefix}"))]
             pieces.append((prefix, _emit_layers(tagged, colors_top)))
             return
         cursor = None
@@ -1035,6 +1043,17 @@ def main():
 
     master = pymupdf.open(); mpage = master.new_page(width=W * MM2PT, height=H * MM2PT)
     mpage.draw_rect(mpage.rect, color=None, fill=(1, 1, 1))
+    for (sbb, tf, cont, dx) in lay.get("_vec_tex", []):               # ВЕКТОР-текстура переда/зада (оригинал макета, НЕ растр)
+        x0, y0 = tf(sbb[0], sbb[1]); x1, y1 = tf(sbb[2], sbb[3])
+        tx0, tx1 = min(x0, x1) + dx, max(x0, x1) + dx; ty0, ty1 = min(y0, y1), max(y0, y1)
+        trect = pymupdf.Rect(tx0 * MM2PT, ty0 * MM2PT, tx1 * MM2PT, ty1 * MM2PT)
+        try:
+            mpage.show_pdf_page(trect, page.parent, page.number, clip=pymupdf.Rect(*sbb))
+        except Exception as _e:
+            print("   вектор-текстура не вставлена:", _e); continue
+        cpts = [pymupdf.Point((px + dx) * MM2PT, py * MM2PT) for px, py in cont.exterior.coords]   # анти-маска: bbox минус контур -> белым
+        shp = mpage.new_shape(); shp.draw_rect(trect); shp.draw_polyline(cpts)
+        shp.finish(fill=(1, 1, 1), color=None, even_odd=True, closePath=True); shp.commit()
     if cfg.get("manual_paint") and cfg.get("gusset_cmyk", True):      # НАТИВНЫЙ CMYK-гассет (точный цвет макета) ПОД контуром
         from side_color import strip_band_quads_cmyk
         for s in lay.get("strips", []):
