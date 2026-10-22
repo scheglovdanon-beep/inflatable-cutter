@@ -180,17 +180,15 @@ def _apply_details(cfg, details):
     return cfg
 
 
-def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, clip_outline=None, details=None, shoulder_round=None, seam_color_lines=None):
+def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, clip_outline=None, details=None, shoulder_round=None):
     """Собрать cfg из выбора пользователя. arms = [{f:[x,y], tip:[x,y], blade?:[[..],[..]],
     wrist?:[[..],[..]], elbow?:[[..],[..]]}] в PT. spare — запасная рука (None=как в базе);
     back_copy — зад=копия переда (симметричная фигура; убирает лишние детали руки у 2-рукой);
-    clip_outline — обрезать контур по чёрной обводке (стикер-макеты с запасом заливок);
-    seam_color_lines — цвет-ключ вшива на переде/гассете/заде (деф. ВКЛ: тусклая подсветка мест
-    сшива перёд↔гассет↔зад на всех деталях; выключить явным False)."""
+    clip_outline — обрезать контур по чёрной обводке (стикер-макеты с запасом заливок)."""
     cfg = _base_cfg(size)
     _apply_clip_outline(cfg, clip_outline)
-    cfg["seam_color_lines"] = True if seam_color_lines is None else bool(seam_color_lines)  # тусклая подсветка швов — ВКЛ по умолчанию
     cfg["seam_color_bands"] = True                                    # полоски-ключи по ЦВЕТОВЫМ зонам на гассете/переде/заде
+    cfg["seam_color_lines"] = False                                   # маркеры второстепенных деталей (рука/кисть/днище) — ВЫКЛ (галочка убрана)
     # gusset_fill_white_nearest НЕ включаем: белая зона гассета = реальный белый кромки (носок кроссовка) -> оставить белым.
     # Настоящие геометрические зазоры чинит fill_edge_gaps (растр переда/зада), а не перекраска зон гассета.
     cfg["arm_hole_mark_color"] = "#ff2a00"                            # отверстие руки — ярким (видно на тёмной боковине)
@@ -975,8 +973,7 @@ def build():
         arms = _fill_tips(d, size, arms, clip_outline=_co)
     cfg = _build_cfg(size, n, data.get("arms_identical", False), arms,
                      spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co,
-                     details=data.get("details"), shoulder_round=data.get("shoulder_round"),
-                     seam_color_lines=data.get("seam_color_lines"))
+                     details=data.get("details"), shoulder_round=data.get("shoulder_round"))
     if data.get("manual_paint"):                                     # РУЧНАЯ покраска гассета (отрезки t0,t1,cmyk)
         cfg["manual_paint"] = data["manual_paint"]
         cfg["seam_color_bands"] = True                              # полоски-карта цветов появляются В РАСКЛАДКЕ (после «сделать раскладку»)

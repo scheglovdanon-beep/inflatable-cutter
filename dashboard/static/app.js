@@ -106,7 +106,7 @@ async function enterStep3(btn){                 // детект кандидат
 }
 $("#toS3").onclick = () => {
   S.size=$("#size").value; S.n=parseInt($("#narms").value); S.ident=$("#ident").checked; S.clip=$("#clipOutline").checked;  // контур по чёрной обводке (деф. выкл)
-  S.hasDetails=$("#hasDetails").checked; S.shoulderRound=$("#shoulderRound").checked; S.seamLines=$("#seamLines").checked;  // цветные линии вшива (деф. выкл)
+  S.hasDetails=$("#hasDetails").checked; S.shoulderRound=$("#shoulderRound").checked;
   S.detailDone=false; S.detail={cut:[],width:[],phase:'cut',crop:null};
   S.arms=Array.from({length:S.n},()=>({armpit:null,shoulder:null,wrist:[],elbow:[]}));
   S.cands=null;
@@ -384,7 +384,7 @@ $("#btnBuild").onclick=async()=>{
   busy($("#btnBuild"),true,"добавляю");
   try{
     const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,name:figName(),
-      clip_outline:S.clip, spare:$("#spare").checked, back_copy:$("#backCopy").checked, details:detailsPayload(), shoulder_round:S.shoulderRound, seam_color_lines:S.seamLines, arms:S.arms.map(armPayload),
+      clip_outline:S.clip, spare:$("#spare").checked, back_copy:$("#backCopy").checked, details:detailsPayload(), shoulder_round:S.shoulderRound, arms:S.arms.map(armPayload),
       manual_paint:(S.paintSegments&&S.paintSegments.length)?S.paintSegments:null};
     const r=await fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); return; }
