@@ -688,7 +688,7 @@ async function goContour(){
   const prev=(S.contourSharpPts||[]);
   try{
     const r=await fetch("/api/contour_regions",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,contour_keep_sharp_pts:prev})});
+      body:JSON.stringify(Object.assign(paintPayload(),{contour_keep_sharp_pts:prev}))});
     const j=await r.json(); if(!r.ok){ msg("#contourMsg",j.error||"ошибка","err"); return; }
     CT={img:null,regions:(j.regions||[]).map(rg=>({poly:rg.poly,cx:rg.cx,cy:rg.cy,
       sel:prev.some(p=>Math.hypot(p[0]-rg.cx,p[1]-rg.cy)<5)})),scale:1};
@@ -728,7 +728,7 @@ $("#contourDo").onclick=async()=>{
   busy($("#contourDo"),true,"пересобираю");
   try{
     const r=await fetch("/api/contour_regions",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,contour_keep_sharp_pts:S.contourSharpPts})});
+      body:JSON.stringify(Object.assign(paintPayload(),{contour_keep_sharp_pts:S.contourSharpPts}))});
     const j=await r.json();
     if(r.ok){ CT.regions=(j.regions||[]).map(rg=>({poly:rg.poly,cx:rg.cx,cy:rg.cy,
         sel:S.contourSharpPts.some(p=>Math.hypot(p[0]-rg.cx,p[1]-rg.cy)<5)}));

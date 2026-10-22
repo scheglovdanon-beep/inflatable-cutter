@@ -725,11 +725,20 @@ def contour_regions():
         from sides import get_front_figure, contour_to_mm, smooth_front, smooth_regions, PT2MM
         from export_pdf_grouped import _bg_fill_colors, _pix_png_nobg
         _co = data.get("clip_outline")
-        cfg = _build_cfg(size, 0, False, [], clip_outline=_co)
+        arms = _fill_tips(d, size, data.get("arms", []), clip_outline=_co)   # руки заданы (этап ПОСЛЕ реза руки)
+        cfg = _build_cfg(size, len(arms), data.get("arms_identical", False), arms,
+                         spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co,
+                         details=data.get("details"), shoulder_round=data.get("shoulder_round"))
         if data.get("contour_keep_sharp_pts"):                        # применить уже выбранные «не сглаживать» -> превью с резкими углами
             cfg["contour_keep_sharp_pts"] = data["contour_keep_sharp_pts"]
         page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
         fig = get_front_figure(page, cfg)
+        if cfg.get("arm_cut") == "armpit":                            # ТЕЛО переда БЕЗ руки (как в build_layout)
+            from arm import cut_waving_arms
+            try:
+                fig.contour_pt, _ = cut_waving_arms(page, fig.contour_pt, cfg, strict=True)
+            except Exception:
+                pass
         raw = contour_to_mm(fig); sm = smooth_front(raw, cfg); regs = smooth_regions(raw, cfg)
         fmm = fig.s * PT2MM
         bx0, by0, bx1, by1 = sm.bounds; mg = 30.0
