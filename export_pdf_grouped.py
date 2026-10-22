@@ -691,13 +691,25 @@ def main():
                 for k in range(n + 1)]
     band_keys = {}                                                    # (strip_i, band_j) -> различимый ключ-цвет зоны
     front_arcs = []
-    if seam_bands:                                                    # ПО ЦВЕТАМ: каждой ЗОНЕ свой ключ, дуга на переде
-        _ctr = 0
+    if seam_bands:                                                    # ПО ЦВЕТАМ: ключ = НЕПРЕРЫВНЫЙ прогон цвета по периметру
+        zones = []                                                    # собрать все зоны в одну последовательность по дуге
         for s in lay.get("strips", []):
             a0, a1 = s.get("arc0", 0.0), s.get("arc1", 0.0); span = (a1 - a0) or 1.0
-            for j, (f0, f1, _rgb) in enumerate(s.get("bands", []) or []):
-                band_keys[(s["i"], j)] = HEX(_palette_vivid(_ctr)); _ctr += 1
-                front_arcs.append((band_keys[(s["i"], j)], _arc_on(a0 + f0 * span, a0 + f1 * span)))
+            for j, (f0, f1, rgb) in enumerate(s.get("bands", []) or []):
+                zones.append((a0 + f0 * span, a0 + f1 * span, tuple(int(v) for v in rgb), s["i"], j))
+        zones.sort(key=lambda z: min(z[0], z[1]))                     # по порядку вдоль периметра гассета
+        adj_tol = cfg.get("seam_band_adj_tol_mm", 3.0)                # допуск смежности на стыке боковин (мм)
+        _ctr = 0; prev = None                                         # смежные одноцветные (вкл. стык верх/низ боковин) -> ОДИН ключ
+        for (za, zb, rgb, si, bj) in zones:
+            lo, hi = min(za, zb), max(za, zb)
+            cont = (prev is not None and abs(lo - prev[0]) <= adj_tol and
+                    max(abs(prev[1][k] - rgb[k]) for k in range(3)) < 8)
+            if not cont:                                              # цвет сменился ИЛИ разрыв -> новый ключ
+                _ctr += 1
+            key = HEX(_palette_vivid(_ctr))
+            band_keys[(si, bj)] = key
+            front_arcs.append((key, _arc_on(lo, hi)))
+            prev = (hi, rgb)
     elif seam_lines:                                                  # ПО ДЕТАЛЯМ: одна дуга-ключ на боковину
         for s in g["segments"]:
             front_arcs.append((HEX(_palette(s["i"])), _arc_on(s["arc0"], s["arc1"])))
