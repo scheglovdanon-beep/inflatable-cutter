@@ -362,7 +362,34 @@ def smooth_front(contour_mm, cfg):
     p = contour_mm.buffer(r, join_style=1).buffer(-r, join_style=1)   # closing (round): впадины -> плавная дуга
     if p.geom_type == "MultiPolygon":
         p = max(p.geoms, key=lambda g: g.area)
-    return p.buffer(0)
+    p = p.buffer(0)
+    pts = cfg.get("contour_keep_sharp_pts")                           # РУЧНОЕ формирование контура: точки «НЕ сглаживать»
+    if pts:                                                           # closing только ДОБАВЛЯет материал (залитые впадины) —
+        from shapely.geometry import Point as _Pt                    # в кликнутых пятнах вычитаем его -> резкий угол как в макете
+        from shapely.ops import unary_union as _uu
+        tol = cfg.get("contour_keep_sharp_tol_mm", 60.0)
+        keep = [g for g in smooth_regions(contour_mm, cfg)
+                if any(g.distance(_Pt(x, y)) <= tol for x, y in pts)]
+        if keep:
+            p = p.difference(_uu(keep)).buffer(0)
+            if p.geom_type == "MultiPolygon":
+                p = max(p.geoms, key=lambda g: g.area)
+    return p
+
+
+def smooth_regions(contour_mm, cfg):
+    """Связные пятна материала, ДОБАВЛЕННОГО сглаживанием (сглаженный − сырой) = скруглённые впадины.
+    Для ручного формирования контура: их подсвечиваем и даём кликать (клик -> не сглаживать там)."""
+    r = cfg.get("front_smooth_mm", 70)
+    if not r or r <= 0:
+        return []
+    p = contour_mm.buffer(r, join_style=1).buffer(-r, join_style=1)
+    if p.geom_type == "MultiPolygon":
+        p = max(p.geoms, key=lambda g: g.area)
+    added = p.buffer(0).difference(contour_mm.buffer(0))
+    min_area = cfg.get("contour_smooth_region_min_mm2", 400.0)        # отсечь мелкие артефакты (мм²)
+    geoms = added.geoms if added.geom_type == "MultiPolygon" else ([added] if not added.is_empty else [])
+    return [g for g in geoms if g.area >= min_area]
 
 
 def _seglen(pts):
