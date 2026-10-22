@@ -191,7 +191,7 @@ def _bg_fill_colors(page, cfg):
     return cols
 
 
-def _pix_png_nobg(pix, bg_cols, tol=40, fill_mask=None, white_sum=720):
+def _pix_png_nobg(pix, bg_cols, tol=40, fill_mask=None, white_sum=720, only_gaps=False):
     """Убрать фон макета из растра. Цвет фона берём из вектора (bg_cols = _bg_fill_colors —
     большой прямоугольник нижнего слоя), но прозрачим ТОЛЬКО область этого цвета, СВЯЗАННУЮ С
     КРАЕМ растра (фон окружает фигуру снаружи). Карман того же цвета ВНУТРИ контура (напр. серые
@@ -227,27 +227,32 @@ def _pix_png_nobg(pix, bg_cols, tol=40, fill_mask=None, white_sum=720):
                 idx = ndimage.distance_transform_edt(bg, return_indices=True)[1]
                 img[fill, :3] = img[idx[0][fill], idx[1][fill], :3]  # ближайший дизайн-пиксель
                 img[fill, 3] = 255
+            if only_gaps:                                           # ОВЕРЛЕЙ зазоров: оставить ТОЛЬКО залитые щели, остальное прозрачно
+                img[~fill, 3] = 0
+        elif only_gaps:
+            img[:, :, 3] = 0
     buf = io.BytesIO(); Image.fromarray(img, "RGBA").save(buf, "PNG")
     return buf.getvalue()
 
 
-def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0):
+def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0, only_gaps=False):
     """Текстура = РАСТР оригинального рендера макета КАК ЕСТЬ (идеальные цвета, градиенты,
     чёрная обводка/плашки — всё точно из макета), обрезанный по контуру детали через clipPath.
     Фон макета убирается универсально (_pix_png_nobg): цветной/серый фон -> прозрачный,
-    near-белый (бумага) и чёрная обводка фигуры сохраняются."""
+    near-белый (бумага) и чёрная обводка фигуры сохраняются.
+    only_gaps=True -> ОВЕРЛЕЙ: только залитые зазоры по краю (прозрачно везде), поверх вектора."""
     import base64
     clip = pymupdf.Rect(*src_bbox_pt)
     pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=True)
     x0, y0 = tf(clip.x0, clip.y0); x1, y1 = tf(clip.x1, clip.y1)       # угол панели (аффин без поворота)
     fmask = None
-    if _FILL_GAPS:                                                     # px-маска контура детали (без утечки за контур)
+    if _FILL_GAPS or only_gaps:                                       # px-маска контура детали (без утечки за контур)
         import numpy as np, cv2
         minx, miny = min(x0, x1), min(y0, y1); wd = abs(x1 - x0) or 1.0; ht = abs(y1 - y0) or 1.0
         cp = np.array([((px - minx) / wd * pix.width, (py - miny) / ht * pix.height)
                        for px, py in contour.exterior.coords], np.int32)
         fmask = np.zeros((pix.height, pix.width), np.uint8); cv2.fillPoly(fmask, [cp], 1)
-    png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS, fill_mask=fmask)).decode()   # убрать фон + залить зазоры
+    png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS, fill_mask=fmask, only_gaps=only_gaps)).decode()   # фон убрать + зазоры
     cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in contour.exterior.coords)
     return (f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'
             f'<image clip-path="url(#{cid})" x="{min(x0, x1):.2f}" y="{min(y0, y1):.2f}" '
@@ -795,10 +800,12 @@ def main():
         tl = _vtiles(panel_poly, holst, seam_mm_v) if _split else None
         if not tl:                                                    # целиком
             if vector_tex:                                           # ВЕКТОР: оригинал макета как SVG В ТЕЛЕ детали (-> в рулон)
-                tagged = [("colors", "\n".join(_design_vector(page, src_bbox, tf, panel_poly, nextid()))),
-                          ("contour", _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw)),
-                          ("seam", _poly(list(panel_seam.exterior.coords), stroke="#000000", sw=lw)),
-                          ("seamlines", _arc_paths(arcs, panel_poly, f"seam_{prefix}"))]
+                tagged = [("colors", "\n".join(_design_vector(page, src_bbox, tf, panel_poly, nextid())))]
+                if _FILL_GAPS:                                        # оверлей зазоров (растр, прозрачный кроме щелей у края) ПОВЕРХ вектора
+                    tagged.append(("colors", _design_raster(page, src_bbox, tf, panel_poly, nextid(), only_gaps=True)))
+                tagged += [("contour", _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw)),
+                           ("seam", _poly(list(panel_seam.exterior.coords), stroke="#000000", sw=lw)),
+                           ("seamlines", _arc_paths(arcs, panel_poly, f"seam_{prefix}"))]
             else:                                                    # РАСТР (старый путь)
                 tagged = [("colors", _design_raster(page, src_bbox, tf, panel_poly, nextid())),
                           ("contour", _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw)),
@@ -812,16 +819,24 @@ def main():
             if cursor is None:
                 cursor = ts.bounds[0]
             dx = cursor - ts.bounds[0]                                # сдвиг так, чтобы полосы легли В РЯД с зазором
+            _kbefore = len(lay.get("_key_arcs", []))
             _tile_seamlines = ("seamlines", _arc_paths(_clip_arcs_x(arcs, bx0, bx1), tp, f"seam_{nm}"))
+            if abs(dx) > 1e-6 and lay.get("_key_arcs"):              # ключи полосы (собраны для CMYK) сдвинуть на dx, как тело
+                ka = lay["_key_arcs"]
+                for _i in range(_kbefore, len(ka)):
+                    ka[_i] = ([(x + dx, y) for x, y in ka[_i][0]], ka[_i][1])
             if vector_tex:                                            # ВЕКТОР-срез полосы В ТЕЛЕ (-> в рулон): src-зона через ИНВЕРСИЮ tf
                 x0, y0 = tf(src_bbox[0], src_bbox[1]); x1, y1 = tf(src_bbox[2], src_bbox[3])
                 ssx = (x1 - x0) / ((src_bbox[2] - src_bbox[0]) or 1.0); ssy = (y1 - y0) / ((src_bbox[3] - src_bbox[1]) or 1.0)
                 tb = tp.bounds
                 sx = sorted((src_bbox[0] + (tb[0] - x0) / ssx, src_bbox[0] + (tb[2] - x0) / ssx))
                 sy = sorted((src_bbox[1] + (tb[1] - y0) / ssy, src_bbox[1] + (tb[3] - y0) / ssy))
-                tagged = [("colors", "\n".join(_design_vector(page, (sx[0], sy[0], sx[1], sy[1]), tf, tp, nextid()))),
-                          ("contour", _poly(list(tp.exterior.coords), stroke="#000", sw=lw)),
-                          ("seam", _poly(list(ts.exterior.coords), stroke="#000000", sw=lw)), _tile_seamlines]
+                _slice = (sx[0], sy[0], sx[1], sy[1])
+                tagged = [("colors", "\n".join(_design_vector(page, _slice, tf, tp, nextid())))]
+                if _FILL_GAPS:                                        # оверлей зазоров полосы ПОВЕРХ вектора
+                    tagged.append(("colors", _design_raster(page, _slice, tf, tp, nextid(), only_gaps=True)))
+                tagged += [("contour", _poly(list(tp.exterior.coords), stroke="#000", sw=lw)),
+                           ("seam", _poly(list(ts.exterior.coords), stroke="#000000", sw=lw)), _tile_seamlines]
             else:
                 tagged = [("colors", _design_raster(page, src_bbox, tf, tp, nextid())),
                           ("contour", _poly(list(tp.exterior.coords), stroke="#000", sw=lw)),
