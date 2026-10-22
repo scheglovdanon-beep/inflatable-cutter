@@ -583,8 +583,8 @@ def _bands_from_manual(s, manual, glen):
         t0, t1, cmyk = seg[0], seg[1], seg[2]
         m0, m1 = t0 * glen, t1 * glen
         ov0, ov1 = max(lo, min(m0, m1)), min(hi, max(m0, m1))
-        if ov1 - ov0 <= 1e-6:
-            continue
+        if ov1 - ov0 < 2.0:                                          # отбросить микро-полоску соседнего цвета на стыке
+            continue                                                 # (суб-мм «хвост» от округления реза -> деталь строго одноцветна)
         fa = (ov0 - a_top) / span; fb = (ov1 - a_top) / span
         f0, f1 = sorted((fa, fb))
         out.append((max(0.0, f0), min(1.0, f1), tuple(float(v) for v in cmyk)))

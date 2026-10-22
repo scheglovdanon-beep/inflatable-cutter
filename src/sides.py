@@ -488,6 +488,23 @@ def build_gusset(contour_mm, cfg):
         final = [v for v in sorted(set(round(x, 3) for x in final))
                  if v in protected or not inside(v)]
 
+    # --- ЦВЕТОВЫЕ резы: граница СМЕНЫ цвета ручной разметки = доп. линия реза гассета (поверх геометрических).
+    #     Так каждая деталь гассета = один цвет = один маркер. Флаг gusset_split_by_color (деф. ВКЛ для manual). ---
+    manual = cfg.get("manual_paint")
+    if manual and cfg.get("gusset_split_by_color", True):
+        segs = sorted(manual, key=lambda s: min(s[0], s[1]))
+        prev_c = None; color_cuts = []
+        for sg in segs:
+            t0 = min(sg[0], sg[1]); c = tuple(round(float(v), 4) for v in sg[2])
+            if prev_c is not None and c != prev_c:            # режем только там, где цвет МЕНЯЕТСЯ
+                arc = round(t0 * gusset_len, 3)
+                if 1.0 < arc < gusset_len - 1.0:
+                    color_cuts.append(arc)
+            prev_c = c
+        if color_cuts:
+            final = sorted(set(round(v, 3) for v in final) | set(color_cuts))
+            protected.update(color_cuts)                      # цветовые резы не сливать (даже короткие)
+
     # --- слить короткие полосы (защищаем нижние и выступ-разрезы) ---
     final = sorted(set(round(v, 3) for v in final))
     merge_thr = cfg.get("side_min_len_mm", 200)
