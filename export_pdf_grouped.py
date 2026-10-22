@@ -255,6 +255,23 @@ def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0):
             f'xlink:href="data:image/png;base64,{png}"/>')
 
 
+def _design_vector(page, src_bbox, tf, contour, cid):
+    """Текстура переда/зада ВЕКТОРОМ (в SVG-теле детали -> копируется в рулон печати): кусок макета
+    как SVG (get_svg_image) с affine (tf: src->layout, scale+translate, в т.ч. зеркало) + клип по
+    контуру. Градиенты макета проброшены как исходные растр-патчи (как в исходном PDF)."""
+    x0, y0, x1, y1 = src_bbox
+    lx0, ly0 = tf(x0, y0); lx1, ly1 = tf(x1, y1)                      # tf в 2 углах -> scale по осям
+    sx = (lx1 - lx0) / ((x1 - x0) or 1.0); sy = (ly1 - ly0) / ((y1 - y0) or 1.0)
+    tmp = pymupdf.open(); tp = tmp.new_page(width=max(1.0, x1 - x0), height=max(1.0, y1 - y0))
+    tp.show_pdf_page(tp.rect, page.parent, page.number, clip=pymupdf.Rect(x0, y0, x1, y1))
+    inner = tp.get_svg_image(text_as_path=True); tmp.close()
+    m = re.search(r"<svg[^>]*>(.*)</svg>", inner, re.S); content = m.group(1) if m else ""
+    cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in contour.exterior.coords)   # temp(0..w,h)->layout: matrix(sx,0,0,sy,lx0,ly0)
+    return [f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>',
+            f'<g clip-path="url(#{cid})"><g transform="matrix({sx:.6f},0,0,{sy:.6f},{lx0:.3f},{ly0:.3f})">',
+            content, "</g></g>"]
+
+
 def _vtiles(poly, max_w, seam_mm):
     """РЕЗ панели (перёд/зад) на вертикальные полосы под печатный холст max_w (1440). Если ширина
     W>max_w -> N=ceil(W/max_w) РАВНЫХ полос на всю высоту (высота уходит вдоль рулона — там без
@@ -777,12 +794,9 @@ def main():
         """Добавить деталь переда/зада в pieces. Шире холста -> N полос РЯДОМ (зазор tgap), иначе целиком."""
         tl = _vtiles(panel_poly, holst, seam_mm_v) if _split else None
         if not tl:                                                    # целиком
-            if vector_tex:                                           # ВЕКТОР: оригинал макета (show_pdf_page) + анти-маска
-                x0, y0 = tf(src_bbox[0], src_bbox[1]); x1, y1 = tf(src_bbox[2], src_bbox[3])
-                tgt = (min(x0, x1) * MM2PT, min(y0, y1) * MM2PT, max(x0, x1) * MM2PT, max(y0, y1) * MM2PT)
-                cpts = [(px * MM2PT, py * MM2PT) for px, py in panel_poly.exterior.coords]
-                lay.setdefault("_vec_tex", []).append((tuple(src_bbox), tgt, cpts))
-                tagged = [("contour", _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw)),
+            if vector_tex:                                           # ВЕКТОР: оригинал макета как SVG В ТЕЛЕ детали (-> в рулон)
+                tagged = [("colors", "\n".join(_design_vector(page, src_bbox, tf, panel_poly, nextid()))),
+                          ("contour", _poly(list(panel_poly.exterior.coords), stroke="#000", sw=lw)),
                           ("seam", _poly(list(panel_seam.exterior.coords), stroke="#000000", sw=lw)),
                           ("seamlines", _arc_paths(arcs, panel_poly, f"seam_{prefix}"))]
             else:                                                    # РАСТР (старый путь)
@@ -799,17 +813,14 @@ def main():
                 cursor = ts.bounds[0]
             dx = cursor - ts.bounds[0]                                # сдвиг так, чтобы полосы легли В РЯД с зазором
             _tile_seamlines = ("seamlines", _arc_paths(_clip_arcs_x(arcs, bx0, bx1), tp, f"seam_{nm}"))
-            if vector_tex:                                            # ВЕКТОР-срез полосы: src-зона через ИНВЕРСИЮ tf
+            if vector_tex:                                            # ВЕКТОР-срез полосы В ТЕЛЕ (-> в рулон): src-зона через ИНВЕРСИЮ tf
                 x0, y0 = tf(src_bbox[0], src_bbox[1]); x1, y1 = tf(src_bbox[2], src_bbox[3])
                 ssx = (x1 - x0) / ((src_bbox[2] - src_bbox[0]) or 1.0); ssy = (y1 - y0) / ((src_bbox[3] - src_bbox[1]) or 1.0)
                 tb = tp.bounds
                 sx = sorted((src_bbox[0] + (tb[0] - x0) / ssx, src_bbox[0] + (tb[2] - x0) / ssx))
                 sy = sorted((src_bbox[1] + (tb[1] - y0) / ssy, src_bbox[1] + (tb[3] - y0) / ssy))
-                lay.setdefault("_vec_tex", []).append((
-                    (sx[0], sy[0], sx[1], sy[1]),
-                    ((tb[0] + dx) * MM2PT, tb[1] * MM2PT, (tb[2] + dx) * MM2PT, tb[3] * MM2PT),
-                    [((px + dx) * MM2PT, py * MM2PT) for px, py in tp.exterior.coords]))
-                tagged = [("contour", _poly(list(tp.exterior.coords), stroke="#000", sw=lw)),
+                tagged = [("colors", "\n".join(_design_vector(page, (sx[0], sy[0], sx[1], sy[1]), tf, tp, nextid()))),
+                          ("contour", _poly(list(tp.exterior.coords), stroke="#000", sw=lw)),
                           ("seam", _poly(list(ts.exterior.coords), stroke="#000000", sw=lw)), _tile_seamlines]
             else:
                 tagged = [("colors", _design_raster(page, src_bbox, tf, tp, nextid())),
@@ -1099,14 +1110,6 @@ def main():
 
     master = pymupdf.open(); mpage = master.new_page(width=W * MM2PT, height=H * MM2PT)
     mpage.draw_rect(mpage.rect, color=None, fill=(1, 1, 1))
-    for (src_r, tgt_r, cont_pts) in lay.get("_vec_tex", []):          # ВЕКТОР-текстура переда/зада (оригинал макета, НЕ растр)
-        try:
-            mpage.show_pdf_page(pymupdf.Rect(*tgt_r), page.parent, page.number, clip=pymupdf.Rect(*src_r))
-        except Exception as _e:
-            print("   вектор-текстура не вставлена:", _e); continue
-        shp = mpage.new_shape(); shp.draw_rect(pymupdf.Rect(*tgt_r))   # анти-маска: bbox минус контур -> белым (прячет вектор за контуром)
-        shp.draw_polyline([pymupdf.Point(*p) for p in cont_pts])
-        shp.finish(fill=(1, 1, 1), color=None, even_odd=True, closePath=True); shp.commit()
     if cfg.get("manual_paint") and cfg.get("gusset_cmyk", True):      # НАТИВНЫЙ CMYK-гассет (точный цвет макета) ПОД контуром
         from side_color import strip_band_quads_cmyk
         for s in lay.get("strips", []):
