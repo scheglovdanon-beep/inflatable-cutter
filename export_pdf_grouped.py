@@ -752,9 +752,12 @@ def main():
     if seam_bands:                                                    # ПО ЦВЕТАМ: ключ = НЕПРЕРЫВНЫЙ прогон цвета по периметру
         zones = []                                                    # собрать все зоны в одну последовательность по дуге
         for s in lay.get("strips", []):
-            a0, a1 = s.get("arc0", 0.0), s.get("arc1", 0.0); span = (a1 - a0) or 1.0
+            a0, a1 = s.get("arc0", 0.0), s.get("arc1", 0.0)
+            flip = s.get("yn0", 0) < s.get("yn1", 0)                  # f=0 у ВЕРХНЕГО ребра полосы (как в bands/_bands_from_manual)
+            a_top, a_bot = (a1, a0) if flip else (a0, a1)             # -> ключ зоны привязан к её ФИЗИЧ. месту (а не к a0 вслепую)
+            span = (a_bot - a_top) or 1.0
             for j, (f0, f1, rgb) in enumerate(s.get("bands", []) or []):
-                zones.append((a0 + f0 * span, a0 + f1 * span, tuple(int(v) for v in rgb), s["i"], j))
+                zones.append((a_top + f0 * span, a_top + f1 * span, tuple(int(v) for v in rgb), s["i"], j))
         zones.sort(key=lambda z: min(z[0], z[1]))                     # по порядку вдоль периметра гассета
         adj_tol = cfg.get("seam_band_adj_tol_mm", 3.0)                # допуск смежности на стыке боковин (мм)
         _ctr = 0; prev = None                                         # смежные одноцветные (вкл. стык верх/низ боковин) -> ОДИН ключ
