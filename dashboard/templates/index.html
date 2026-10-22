@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1420">
 <title>Раскрой надувных фигур — админка</title>
-<link rel="stylesheet" href="/static/style.css?v=2026seamrm">
+<link rel="stylesheet" href="/static/style.css?v=2026contour">
 </head>
 <body>
 <header>
@@ -13,6 +13,7 @@
   <div class="steps">
     <span class="step on" data-s="1">1. Макет</span>
     <span class="step" data-s="2">2. Параметры</span>
+    <span class="step" data-s="C">Контур</span>
     <span class="step" data-s="3">3. Рез руки</span>
     <span class="step" data-s="4">4. Кисть/предплечье</span>
     <span class="step" data-s="D">Детали</span>
@@ -76,7 +77,31 @@
       </div>
       <div class="canvaswrap" id="s2imgWrap"><img id="s2macet" alt="макет"></div>
     </div>
-    <div class="nav"><button class="back" data-to="1">← назад</button><button id="toS3">далее →</button></div>
+    <div class="nav"><button class="back" data-to="1">← назад</button><button id="btnContour" class="back">📐 Формирование контура</button><button id="toS3">далее →</button></div>
+  </section>
+
+  <!-- ШАГ Контур: ручное формирование (отключение сглаживания по зонам) -->
+  <section id="sC" class="panel">
+    <h2>Формирование контура</h2>
+    <div class="row">
+      <div class="controls">
+        <p>На резких углах контур <b>сглаживается</b>. <span style="color:#19a">Зелёным</span> подсвечены места, где сглаживание изменило форму.</p>
+        <ol>
+          <li>Кликни по <b>зелёной зоне</b>, если там сглаживать <b>не надо</b> — станет <span style="color:#e2504a">красной</span> (угол останется резким).</li>
+          <li>Повторный клик — вернуть сглаживание.</li>
+          <li>Нажми <b>«Создать контур»</b> — контур пересоберётся по твоим правкам.</li>
+        </ol>
+        <p class="prompt" id="contourPrompt">Зелёные зоны сглаживаются. Отмеченные красным — остаются резкими.</p>
+        <div style="margin-top:6px">
+          <button id="contourReset" class="back">сброс</button>
+          <button id="contourDo">✓ Создать контур</button>
+        </div>
+        <div id="contourMsg" class="msg"></div>
+        <p class="hint">Правки применяются к переду; зад строится по тому же контуру. Сглаживание — радиус front_smooth_mm.</p>
+      </div>
+      <div class="canvaswrap"><canvas id="ccv"></canvas></div>
+    </div>
+    <div class="nav"><button class="back" data-to="2">← назад к параметрам</button></div>
   </section>
 
   <!-- ШАГ 3: рез руки (выбор точек по номерам) -->
@@ -213,6 +238,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=2026seamrm"></script>
+<script src="/static/app.js?v=2026contour"></script>
 </body>
 </html>

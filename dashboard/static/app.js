@@ -385,6 +385,7 @@ $("#btnBuild").onclick=async()=>{
   try{
     const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,name:figName(),
       clip_outline:S.clip, spare:$("#spare").checked, back_copy:$("#backCopy").checked, details:detailsPayload(), shoulder_round:S.shoulderRound, arms:S.arms.map(armPayload),
+      contour_keep_sharp_pts:(S.contourSharpPts&&S.contourSharpPts.length)?S.contourSharpPts:null,
       manual_paint:(S.paintSegments&&S.paintSegments.length)?S.paintSegments:null};
     const r=await fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); return; }
@@ -677,3 +678,63 @@ $("#paintDo").onclick=()=>{
   msg("#buildMsg","Готово к сборке с ручной покраской гассета.","ok");
 };
 $("#btnPaint").onclick=()=>goPaint();
+
+// ===== Формирование контура (ручное отключение сглаживания по зонам) =====
+const ccv=$("#ccv");
+let CT=null;  // {img, regions:[{poly,cx,cy,sel}], scale}
+async function goContour(){
+  if(!S.sid){ alert("Сначала загрузите макет"); return; }
+  show("C"); msg("#contourMsg","строю контур…","spin");
+  const prev=(S.contourSharpPts||[]);
+  try{
+    const r=await fetch("/api/contour_regions",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,contour_keep_sharp_pts:prev})});
+    const j=await r.json(); if(!r.ok){ msg("#contourMsg",j.error||"ошибка","err"); return; }
+    CT={img:null,regions:(j.regions||[]).map(rg=>({poly:rg.poly,cx:rg.cx,cy:rg.cy,
+      sel:prev.some(p=>Math.hypot(p[0]-rg.cx,p[1]-rg.cy)<5)})),scale:1};
+    const im=new Image();
+    im.onload=()=>{ CT.img=im; const maxw=880; CT.scale=Math.min(1,maxw/im.naturalWidth);
+      ccv.width=Math.round(im.naturalWidth*CT.scale); ccv.height=Math.round(im.naturalHeight*CT.scale); drawContour(); };
+    im.src=imgURL(j.img); msg("#contourMsg","","");
+  }catch(e){ msg("#contourMsg","не удалось построить контур","err"); }
+}
+function drawContour(){
+  if(!CT||!CT.img) return; const c=ccv.getContext("2d"); const s=CT.scale;
+  c.clearRect(0,0,ccv.width,ccv.height); c.drawImage(CT.img,0,0,ccv.width,ccv.height);
+  CT.regions.forEach(rg=>{
+    c.beginPath(); rg.poly.forEach((p,i)=>{const x=p[0]*s,y=p[1]*s; i?c.lineTo(x,y):c.moveTo(x,y);}); c.closePath();
+    c.fillStyle=rg.sel?"rgba(226,80,74,0.60)":"rgba(32,200,120,0.50)";
+    c.strokeStyle=rg.sel?"#e2504a":"#16a85a"; c.lineWidth=2; c.fill(); c.stroke();
+  });
+}
+function _ptInPoly(px,py,poly){ let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){ const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];
+    if(((yi>py)!=(yj>py)) && (px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside; } return inside; }
+function _nearRegion(px,py){ let bi=-1,bd=1e18;
+  for(let i=0;i<CT.regions.length;i++){ const poly=CT.regions[i].poly;
+    if(_ptInPoly(px,py,poly)) return i;
+    for(const q of poly){ const d=Math.hypot(q[0]-px,q[1]-py); if(d<bd){bd=d;bi=i;} } }
+  return bd<45?bi:-1; }
+ccv.addEventListener("click", e=>{
+  if(!CT||!CT.img) return; const r=ccv.getBoundingClientRect();
+  const ix=((e.clientX-r.left)*(ccv.width/r.width))/CT.scale, iy=((e.clientY-r.top)*(ccv.height/r.height))/CT.scale;
+  const i=_nearRegion(ix,iy); if(i<0){ msg("#contourMsg","кликните по зелёной зоне","err"); return; }
+  CT.regions[i].sel=!CT.regions[i].sel; msg("#contourMsg","",""); drawContour();
+});
+$("#contourReset").onclick=()=>{ if(!CT)return; CT.regions.forEach(r=>r.sel=false); S.contourSharpPts=[]; drawContour(); msg("#contourMsg","сброшено — все зоны сглаживаются.",""); };
+$("#contourDo").onclick=async()=>{
+  if(!CT) return;
+  S.contourSharpPts=CT.regions.filter(r=>r.sel).map(r=>[r.cx,r.cy]);
+  busy($("#contourDo"),true,"пересобираю");
+  try{
+    const r=await fetch("/api/contour_regions",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({sid:S.sid,size:S.size,clip_outline:S.clip,contour_keep_sharp_pts:S.contourSharpPts})});
+    const j=await r.json();
+    if(r.ok){ CT.regions=(j.regions||[]).map(rg=>({poly:rg.poly,cx:rg.cx,cy:rg.cy,
+        sel:S.contourSharpPts.some(p=>Math.hypot(p[0]-rg.cx,p[1]-rg.cy)<5)}));
+      const im=new Image(); im.onload=()=>{ CT.img=im; drawContour(); }; im.src=imgURL(j.img); }
+    msg("#contourMsg","✓ контур создан ("+S.contourSharpPts.length+" зон без сглаживания). Применится при сборке.","ok");
+  }catch(e){ msg("#contourMsg","ошибка пересборки контура","err"); }
+  finally{ busy($("#contourDo"),false); }
+};
+$("#btnContour").onclick=()=>goContour();

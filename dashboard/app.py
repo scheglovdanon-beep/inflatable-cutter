@@ -712,6 +712,52 @@ def paint_contour():
         return jsonify(error=f"контур покраски не удался: {e}", tb=traceback.format_exc()[-400:]), 400
 
 
+@app.route("/api/contour_regions", methods=["POST"])
+def contour_regions():
+    """РУЧНОЕ ФОРМИРОВАНИЕ КОНТУРА: превью переда (сглаженный контур) + ЗОНЫ, где сглаживание
+    изменило форму (скруглённые углы) — их подсвечиваем и даём кликать. Клик по зоне -> её центр
+    (мм) идёт в contour_keep_sharp_pts -> сглаживание там отключается (резкий угол)."""
+    data = request.get_json(force=True)
+    d = _sdir(data["sid"]); size = data.get("size", "2700")
+    try:
+        import io
+        from PIL import Image, ImageDraw
+        from sides import get_front_figure, contour_to_mm, smooth_front, smooth_regions, PT2MM
+        from export_pdf_grouped import _bg_fill_colors, _pix_png_nobg
+        _co = data.get("clip_outline")
+        cfg = _build_cfg(size, 0, False, [], clip_outline=_co)
+        if data.get("contour_keep_sharp_pts"):                        # применить уже выбранные «не сглаживать» -> превью с резкими углами
+            cfg["contour_keep_sharp_pts"] = data["contour_keep_sharp_pts"]
+        page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
+        fig = get_front_figure(page, cfg)
+        raw = contour_to_mm(fig); sm = smooth_front(raw, cfg); regs = smooth_regions(raw, cfg)
+        fmm = fig.s * PT2MM
+        bx0, by0, bx1, by1 = sm.bounds; mg = 30.0
+        sc = 1000.0 / max(bx1 - bx0, by1 - by0)
+        W = int((bx1 - bx0) * sc + 2 * mg); H = int((by1 - by0) * sc + 2 * mg)
+        T = lambda x, y: [round((x - bx0) * sc + mg, 1), round((y - by0) * sc + mg, 1)]
+        Z = fmm * sc
+        clip = pymupdf.Rect(bx0 / fmm, by0 / fmm, bx1 / fmm, by1 / fmm)
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(Z, Z), clip=clip, alpha=True)
+        tex = Image.open(io.BytesIO(_pix_png_nobg(pix, _bg_fill_colors(page, cfg)))).convert("RGBA")
+        im = Image.new("RGB", (W, H), (255, 255, 255))
+        mask = Image.new("L", tex.size, 0)
+        ImageDraw.Draw(mask).polygon([((x - bx0) * sc, (y - by0) * sc) for x, y in sm.exterior.coords], fill=255)
+        tex.putalpha(Image.composite(tex.getchannel("A"), Image.new("L", tex.size, 0), mask))
+        im.paste(tex, (int(mg), int(mg)), tex)
+        ImageDraw.Draw(im).line([tuple(T(x, y)) for x, y in sm.exterior.coords], fill=(20, 24, 32), width=2)
+        fn = "contour_front.png"; im.save(os.path.join(d, fn))
+        regions = []
+        for gg in sorted(regs, key=lambda g: -g.area):
+            c = gg.representative_point()
+            regions.append({"poly": [T(x, y) for x, y in gg.exterior.coords],
+                            "cx": round(float(c.x), 2), "cy": round(float(c.y), 2)})
+        return jsonify(img=f"/api/img/{data['sid']}/{fn}", W=W, H=H, regions=regions)
+    except Exception as e:
+        import traceback
+        return jsonify(error=f"контур не удался: {e}", tb=traceback.format_exc()[-400:]), 400
+
+
 @app.route("/api/paint_sample", methods=["POST"])
 def paint_sample():
     """Пипетка: клик (x,y в px превью) → ТОЧНЫЙ цвет макета в CMYK (как в макете) + RGB-превью."""
@@ -977,6 +1023,8 @@ def build():
     if data.get("manual_paint"):                                     # РУЧНАЯ покраска гассета (отрезки t0,t1,cmyk)
         cfg["manual_paint"] = data["manual_paint"]
         cfg["seam_color_bands"] = True                              # полоски-карта цветов появляются В РАСКЛАДКЕ (после «сделать раскладку»)
+    if data.get("contour_keep_sharp_pts"):                           # РУЧНОЕ формирование контура: точки «не сглаживать»
+        cfg["contour_keep_sharp_pts"] = data["contour_keep_sharp_pts"]
     jid = uuid.uuid4().hex[:10]
     job = {"id": jid, "sid": sid, "cfg": cfg, "want_svg": bool(data.get("svg", True)),
            "name": (data.get("name") or "макет"), "size": size, "n_arms": n,
