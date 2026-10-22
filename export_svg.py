@@ -147,15 +147,19 @@ def build_layout(page, cfg):
     # 1 РУКА + РЕЗ ПО 1 ТОЧКЕ: линия реза (горизонталь на уровне верха реза). Боковину, которая
     # ПЕРЕСЕКАЕТ линию, РЕЖЕМ на 2 детали по линии. Выше линии -> вся под 1/ratio; ниже -> узкая
     # сторона с 1/ratio ПЛАВНО (длина arm_narrow_blend_mm) расширяется до стандарта.
-    if cfg.get("arm_narrow_upper") and len(cut_arms) == 1 and cut_arms[0].get("one_point") and cut_arms[0].get("blade_pt"):
+    # Сужение верхней части: триггер — ЗАКРУГЛЕНИЕ ПЛЕЧА (shoulder_round, галочка) ЛИБО старое
+    # arm_narrow_upper+one_point (автономный космонавт). В дашборде arm_narrow_upper выкл -> только shoulder_round.
+    if len(cut_arms) == 1 and cut_arms[0].get("blade_pt") and \
+            ((cfg.get("arm_narrow_upper") and cut_arms[0].get("one_point")) or cfg.get("shoulder_round")):
         from sides import narrow_upper_gusset
         _bl = cut_arms[0]["blade_pt"]; _fmm = fig.s * PT2MM
         narrow_upper_gusset(g, min(_bl[0][1], _bl[1][1]) * _fmm,
                             ratio=cfg.get("arm_narrow_ratio", cfg.get("shoulder_next_ratio", 1.7)),
                             blend_mm=float(cfg.get("arm_narrow_blend_mm", 400.0)))
     # 2 РУКИ: гассет по дуге МЕЖДУ верхними точками реза плеч (поверху) -> × 1/ratio.
-    if cfg.get("arm_narrow_between") and len(cut_arms) == 2 and _body_precut is not None \
-            and all(c.get("one_point", True) for c in cut_arms):     # сужение только при резе по 1 точке (не хорда)
+    if len(cut_arms) == 2 and _body_precut is not None \
+            and ((cfg.get("arm_narrow_between") and all(c.get("one_point", True) for c in cut_arms))
+                 or cfg.get("shoulder_round")):                       # триггер: shoulder_round ИЛИ старый arm_narrow_between+one_point
         import numpy as _np
         from arm import blade_perp
         from shapely.geometry import LineString as _LS, Point as _Pt

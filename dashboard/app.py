@@ -195,6 +195,8 @@ def _build_cfg(size, n_arms, arms_identical, arms, spare=None, back_copy=None, c
     cfg["fill_edge_gaps"] = False                                     # заливка краёв ВЫКЛ (флаг оставлен; можно включить вручную в cfg)
     if shoulder_round is not None:                                    # закругление плеча (купол у шеи)
         cfg["shoulder_round"] = bool(shoulder_round)
+    cfg["arm_narrow_upper"] = False                                   # сужение верха — НЕ от реза 90°, а от галочки «закруглять плечо»
+    cfg["arm_narrow_between"] = False                                 # (сужение теперь привязано к shoulder_round)
     cfg["arm_hole_no_seam"] = True                                    # у отверстия руки без припуск-обводки
     if back_copy is not None:
         cfg["back_from_front"] = bool(back_copy)
