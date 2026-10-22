@@ -384,7 +384,8 @@ $("#btnBuild").onclick=async()=>{
   busy($("#btnBuild"),true,"добавляю");
   try{
     const body={sid:S.sid,size:S.size,n_arms:S.n,arms_identical:S.ident,svg:true,name:figName(),
-      clip_outline:S.clip, spare:$("#spare").checked, back_copy:$("#backCopy").checked, details:detailsPayload(), shoulder_round:S.shoulderRound, seam_color_lines:S.seamLines, arms:S.arms.map(armPayload)};
+      clip_outline:S.clip, spare:$("#spare").checked, back_copy:$("#backCopy").checked, details:detailsPayload(), shoulder_round:S.shoulderRound, seam_color_lines:S.seamLines, arms:S.arms.map(armPayload),
+      manual_paint:(S.paintSegments&&S.paintSegments.length)?S.paintSegments:null};
     const r=await fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const j=await r.json(); if(!r.ok){ msg("#buildMsg",j.error||"ошибка","err"); return; }
     msg("#buildMsg","✓ добавлено в очередь — прогресс в блоке «Очередь сборки» ниже. Можно настроить ещё фигуру.","ok");
@@ -588,3 +589,91 @@ $("#editHand").onclick = async () => {          // заново задетект
   }catch(e){ msg("#buildMsg","ошибка подготовки руки","err"); }
   finally{ busy($("#editHand"),false); }
 };
+
+// ---------- ШАГ 6: РУЧНАЯ ПОКРАСКА ГАССЕТА ----------
+let P=null;
+const pcv=$("#pcv");
+function paintPayload(){
+  return {sid:S.sid,size:S.size,clip_outline:S.clip,arms_identical:S.ident,
+    spare:$("#spare").checked, back_copy:$("#backCopy").checked,
+    details:detailsPayload(), shoulder_round:S.shoulderRound, arms:S.arms.map(armPayload)};
+}
+async function goPaint(){
+  show(6); msg("#paintMsg","строю контур гассета…","spin");
+  try{
+    const r=await fetch("/api/paint_contour",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(paintPayload())});
+    const j=await r.json(); if(!r.ok){ msg("#paintMsg",(j.error||"ошибка"),"err"); return; }
+    let cum=[0]; for(let i=1;i<j.gusset.length;i++){const a=j.gusset[i-1],b=j.gusset[i];cum.push(cum[i-1]+Math.hypot(b[0]-a[0],b[1]-a[1]));}
+    const tot=cum[cum.length-1]||1;
+    P={img:null, gusset:j.gusset, gcum:cum.map(v=>v/tot), bottom:j.bottom||[],
+       meta:{bx0:j.bx0,by0:j.by0,sc:j.sc,mg:j.mg,fmm:j.fmm}, pts:[], segs:[], phase:'point', pend:null, scale:1};
+    const im=new Image();
+    im.onload=()=>{ P.img=im; const maxw=880; P.scale=Math.min(1,maxw/im.naturalWidth);
+      pcv.width=Math.round(im.naturalWidth*P.scale); pcv.height=Math.round(im.naturalHeight*P.scale); drawPaint(); };
+    im.src=imgURL(j.img);
+    msg("#paintMsg","",""); renderSegs(); paintPrompt();
+  }catch(e){ msg("#paintMsg","не удалось построить контур","err"); }
+}
+function nearestGusset(ix,iy){ let bi=0,bd=1e18; for(let i=0;i<P.gusset.length;i++){const d=Math.hypot(P.gusset[i][0]-ix,P.gusset[i][1]-iy); if(d<bd){bd=d;bi=i;}} return {i:bi,d:bd}; }
+function tToIdx(t){ let bi=0,bd=1e18; for(let i=0;i<P.gcum.length;i++){const d=Math.abs(P.gcum[i]-t); if(d<bd){bd=d;bi=i;}} return bi; }
+function gussetSpanPx(t0,t1){ const o=[]; for(let i=0;i<P.gusset.length;i++){ if(P.gcum[i]>=t0-1e-6 && P.gcum[i]<=t1+1e-6) o.push(P.gusset[i]); } return o; }
+function drawPaint(){
+  if(!P||!P.img) return; const c=pcv.getContext("2d"); const s=P.scale;
+  c.clearRect(0,0,pcv.width,pcv.height); c.drawImage(P.img,0,0,pcv.width,pcv.height);
+  if(P.bottom.length){ c.strokeStyle="#9aa3ad"; c.lineWidth=5; c.setLineDash([8,6]); c.beginPath();
+    P.bottom.forEach((p,i)=>{const x=p[0]*s,y=p[1]*s; i?c.lineTo(x,y):c.moveTo(x,y);}); c.stroke(); c.setLineDash([]); }
+  c.strokeStyle="#2b8cf0"; c.lineWidth=3; c.beginPath();
+  P.gusset.forEach((p,i)=>{const x=p[0]*s,y=p[1]*s; i?c.lineTo(x,y):c.moveTo(x,y);}); c.stroke();
+  P.segs.forEach(seg=>{ if(!seg.cmyk) return; const sp=gussetSpanPx(seg.t0,seg.t1); if(sp.length<2)return;
+    c.strokeStyle=seg.hex; c.lineWidth=9; c.beginPath(); sp.forEach((p,i)=>{const x=p[0]*s,y=p[1]*s; i?c.lineTo(x,y):c.moveTo(x,y);}); c.stroke(); });
+  P.pts.forEach(t=>{ const p=P.gusset[tToIdx(t)]; const x=p[0]*s,y=p[1]*s;
+    c.fillStyle="#ff2a00"; c.strokeStyle="#fff"; c.lineWidth=2; c.beginPath(); c.arc(x,y,6,0,7); c.fill(); c.stroke(); });
+}
+pcv.addEventListener("click", async e=>{
+  if(!P||!P.img) return; const r=pcv.getBoundingClientRect();
+  const dx=(e.clientX-r.left)*(pcv.width/r.width), dy=(e.clientY-r.top)*(pcv.height/r.height);
+  const ix=dx/P.scale, iy=dy/P.scale;
+  if(P.phase==='color'){
+    msg("#paintMsg","беру цвет…","spin");
+    try{
+      const rr=await fetch("/api/paint_sample",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({sid:S.sid,x:ix,y:iy,bx0:P.meta.bx0,by0:P.meta.by0,sc:P.meta.sc,mg:P.meta.mg,fmm:P.meta.fmm})});
+      const j=await rr.json(); if(!rr.ok){ msg("#paintMsg",j.error||"ошибка пипетки","err"); return; }
+      P.segs[P.pend].cmyk=j.cmyk; P.segs[P.pend].hex=j.hex; P.pend=null; P.phase='point'; msg("#paintMsg","","");
+    }catch(err){ msg("#paintMsg","ошибка пипетки","err"); return; }
+  } else {
+    const ng=nearestGusset(ix,iy);
+    if(ng.d>30){ msg("#paintMsg","кликните ближе к синему контуру гассета","err"); return; }
+    P.pts.push(P.gcum[ng.i]); msg("#paintMsg","","");
+    if(P.pts.length>=2){ const a=P.pts[P.pts.length-2], b=P.pts[P.pts.length-1];
+      P.segs.push({t0:Math.min(a,b),t1:Math.max(a,b),cmyk:null,hex:"#cccccc"}); P.pend=P.segs.length-1; P.phase='color'; }
+  }
+  drawPaint(); renderSegs(); paintPrompt();
+});
+function renderSegs(){
+  if(!P) return;
+  $("#paintSegs").innerHTML = P.segs.map((s,i)=>
+    `<div class="pseg"><span class="pswatch" style="background:${s.hex}"></span> №${i+1}: ${(s.t0*100).toFixed(0)}–${(s.t1*100).toFixed(0)}% `+
+    (s.cmyk?`CMYK ${s.cmyk.map(v=>Math.round(v*100)).join("/")}`:`<i>пипетка…</i>`)+`</div>`).join("");
+  const covered=P.segs.filter(s=>s.cmyk).reduce((a,s)=>a+(s.t1-s.t0),0);
+  $("#paintDo").disabled = !(covered>=0.85 && P.segs.length && P.segs.every(s=>s.cmyk));
+}
+function paintPrompt(){ if(!P)return;
+  $("#paintPrompt").textContent = P.phase==='color'
+    ? "🎨 Пипетка: кликните по фигуре — возьмётся её цвет для текущего отрезка."
+    : (P.pts.length? "Поставьте следующую точку на синем контуре (по кругу)." : "Поставьте первую точку на синем контуре."); }
+$("#paintUndo").onclick=()=>{ if(!P)return;
+  if(P.phase==='color'){ P.segs.pop(); P.pts.pop(); P.pend=null; P.phase='point'; }
+  else if(P.segs.length){ const l=P.segs[P.segs.length-1]; l.cmyk=null; l.hex="#cccccc"; P.pend=P.segs.length-1; P.phase='color'; }
+  else if(P.pts.length){ P.pts.pop(); }
+  drawPaint(); renderSegs(); paintPrompt(); };
+$("#paintDo").onclick=()=>{
+  let segs=P.segs.filter(s=>s.cmyk).map(s=>({t0:s.t0,t1:s.t1,cmyk:s.cmyk}));
+  segs.sort((a,b)=>a.t0-b.t0);
+  if(segs.length){ segs[0].t0=0; segs[segs.length-1].t1=1; }
+  S.paintSegments=segs.map(s=>[s.t0,s.t1,s.cmyk]);
+  show(5); $("#paintState").style.display="block";
+  $("#paintState").textContent="🎨 Ручная покраска задана ("+S.paintSegments.length+" отрезков). Нажмите «Поставить в очередь на сборку».";
+  msg("#buildMsg","Готово к сборке с ручной покраской гассета.","ok");
+};
+$("#btnPaint").onclick=()=>goPaint();

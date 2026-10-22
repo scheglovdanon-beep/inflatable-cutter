@@ -17,6 +17,7 @@
     <span class="step" data-s="4">4. Кисть/предплечье</span>
     <span class="step" data-s="D">Детали</span>
     <span class="step" data-s="5">5. Раскладка</span>
+    <span class="step" data-s="6">6. Покраска</span>
   </div>
 </header>
 
@@ -160,7 +161,9 @@
       </div>
     </div>
     <button id="btnBuild">➕ Поставить в очередь на сборку</button>
+    <button id="btnPaint" class="back">🎨 Ручная покраска гассета</button>
     <div id="buildMsg" class="msg"></div>
+    <p class="hint" id="paintState" style="display:none"></p>
     <p class="hint">Сборка встанет в очередь и пойдёт по очереди. Можно вернуться и настроить ещё фигуру — тоже добавится в очередь. Прогресс и скачивание — в блоке «Очередь сборки» ниже.</p>
     <button id="btnCheck" class="back">🔍 Перепроверить фигуру</button>
     <div id="checkMsg" class="msg"></div>
@@ -174,6 +177,31 @@
       <button class="back" data-to="2">← изменить параметры</button>
       <button class="back" data-to="1">+ новая фигура</button>
     </div>
+  </section>
+
+  <!-- ШАГ 6: ручная покраска гассета -->
+  <section id="s6" class="panel">
+    <h2>Ручная покраска гассета</h2>
+    <div class="row">
+      <div class="controls">
+        <p>Красим <b>только гассет</b> (боковины). <span style="color:#2b8cf0">Синий контур</span> — периметр гассета (красим). <span style="color:#888">Серый пунктир</span> снизу — днище, заблокировано.</p>
+        <ol>
+          <li>Кликай по <b>синему контуру</b> — ставь точки по периметру.</li>
+          <li>После 2-й точки — режим <b>пипетки</b>: кликни по фигуре в нужном месте, возьмётся её цвет.</li>
+          <li>Повторяй по кругу, пока не покроешь весь периметр.</li>
+        </ol>
+        <p class="prompt" id="paintPrompt">Поставьте первую точку на синем контуре.</p>
+        <div id="paintSegs" class="paintsegs"></div>
+        <div style="margin-top:6px">
+          <button id="paintUndo">← шаг назад</button>
+          <button id="paintDo" disabled>🎨 Покрасить фигуру</button>
+        </div>
+        <div id="paintMsg" class="msg"></div>
+        <p class="hint">Пипетка берёт ТОЧНЫЙ цвет макета (CMYK как в макете). Днище трогать нельзя.</p>
+      </div>
+      <div class="canvaswrap"><canvas id="pcv"></canvas></div>
+    </div>
+    <div class="nav"><button class="back" data-to="5">← назад к раскладке</button></div>
   </section>
 </main>
 

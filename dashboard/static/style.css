@@ -253,3 +253,8 @@ canvas{display:block; cursor:crosshair; max-width:100%; height:auto; border-radi
 .chk-fail{ opacity:1; transform:translateX(0); background:#fdeeee; }
 .chk-fail .chk-ico, .chk-fail .chk-res{ color:#d22; }
 #btnCheck{ margin-top:6px; }
+
+/* Ручная покраска гассета */
+.paintsegs{ max-height:220px; overflow:auto; margin:6px 0; }
+.pseg{ font-size:13px; padding:2px 0; display:flex; align-items:center; }
+.pswatch{ display:inline-block; width:16px; height:16px; border:1px solid #000; border-radius:3px; margin-right:6px; }

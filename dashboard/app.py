@@ -656,6 +656,87 @@ def front_preview():
         return jsonify(error=f"превью переда не удалось: {e}"), 400
 
 
+def _coords(obj):
+    """(x,y)-список из LineString/MultiPoint/списка."""
+    if obj is None:
+        return []
+    if hasattr(obj, "coords"):
+        return [(float(x), float(y)) for x, y in obj.coords]
+    return [(float(p[0]), float(p[1])) for p in obj]
+
+
+@app.route("/api/paint_contour", methods=["POST"])
+def paint_contour():
+    """Данные панели РУЧНОЙ ПОКРАСКИ: превью переда + ГАССЕТ-контур (gusset_line — красим) +
+    зона ДНИЩА (bottom_pts — заблокирована) в пикселях + длина периметра + параметры перевода
+    пиксель→pt (для пипетки). Красим ТОЛЬКО гассет; перёд/зад — только фон-картинка."""
+    data = request.get_json(force=True)
+    d = _sdir(data["sid"]); size = data.get("size", "2700")
+    try:
+        import io
+        from PIL import Image, ImageDraw
+        from export_svg import build_layout
+        from export_pdf_grouped import _bg_fill_colors, _pix_png_nobg
+        from sides import PT2MM
+        _co = data.get("clip_outline")
+        arms = _fill_tips(d, size, data.get("arms", []), clip_outline=_co)
+        cfg = _build_cfg(size, len(arms), data.get("arms_identical", False), arms,
+                         spare=data.get("spare"), back_copy=data.get("back_copy"), clip_outline=_co,
+                         details=data.get("details"), shoulder_round=data.get("shoulder_round"))
+        page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]; page._cfg = cfg
+        lay, fig, cm, g, ap, sm = build_layout(page, cfg)
+        fmm = fig.s * PT2MM
+        ext = cm.exterior
+        bx0, by0, bx1, by1 = cm.bounds; mg = 30.0
+        sc = 1000.0 / max(bx1 - bx0, by1 - by0)
+        W = int((bx1 - bx0) * sc + 2 * mg); H = int((by1 - by0) * sc + 2 * mg)
+        T = lambda x, y: [round((x - bx0) * sc + mg, 1), round((y - by0) * sc + mg, 1)]
+        # текстура переда (как в front_preview)
+        Z = fmm * sc
+        clip = pymupdf.Rect(bx0 / fmm, by0 / fmm, bx1 / fmm, by1 / fmm)
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(Z, Z), clip=clip, alpha=True)
+        tex = Image.open(io.BytesIO(_pix_png_nobg(pix, _bg_fill_colors(page, cfg)))).convert("RGBA")
+        im = Image.new("RGB", (W, H), (255, 255, 255))
+        mask = Image.new("L", tex.size, 0)
+        ImageDraw.Draw(mask).polygon([((x - bx0) * sc, (y - by0) * sc) for x, y in ext.coords], fill=255)
+        tex.putalpha(Image.composite(tex.getchannel("A"), Image.new("L", tex.size, 0), mask))
+        im.paste(tex, (int(mg), int(mg)), tex)
+        ImageDraw.Draw(im).polygon([tuple(T(x, y)) for x, y in ext.coords], outline=(20, 24, 32), width=2)
+        fn = "paint_front.png"; im.save(os.path.join(d, fn))
+        gl = g["gusset_line"]; glen = float(g.get("gusset_len") or gl.length)
+        gpx = [T(x, y) for x, y in _coords(gl)]                       # гассет-контур (красим)
+        bpx = [T(x, y) for x, y in _coords(g.get("bottom_pts"))]       # зона днища (locked)
+        return jsonify(img=f"/api/img/{data['sid']}/{fn}", W=W, H=H,
+                       gusset=gpx, gusset_len=glen, bottom=bpx,
+                       bx0=bx0, by0=by0, sc=sc, mg=mg, fmm=fmm)
+    except Exception as e:
+        import traceback
+        return jsonify(error=f"контур покраски не удался: {e}", tb=traceback.format_exc()[-400:]), 400
+
+
+@app.route("/api/paint_sample", methods=["POST"])
+def paint_sample():
+    """Пипетка: клик (x,y в px превью) → ТОЧНЫЙ цвет макета в CMYK (как в макете) + RGB-превью."""
+    data = request.get_json(force=True)
+    d = _sdir(data["sid"])
+    try:
+        import numpy as np
+        bx0, by0, sc, mg, fmm = data["bx0"], data["by0"], data["sc"], data["mg"], data["fmm"]
+        mm_x = (data["x"] - mg) / sc + bx0; mm_y = (data["y"] - mg) / sc + by0
+        pt_x, pt_y = mm_x / fmm, mm_y / fmm
+        page = pymupdf.open(os.path.join(d, "macet.pdf"))[0]
+        clip = pymupdf.Rect(pt_x - 1.5, pt_y - 1.5, pt_x + 1.5, pt_y + 1.5)
+        pix = page.get_pixmap(colorspace=pymupdf.csCMYK, matrix=pymupdf.Matrix(3, 3), clip=clip)
+        arr = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)
+        c = arr[arr.shape[0] // 2, arr.shape[1] // 2]
+        cmyk = [round(float(v) / 255.0, 3) for v in c]
+        rr = int(255 * (1 - cmyk[0]) * (1 - cmyk[3])); gg = int(255 * (1 - cmyk[1]) * (1 - cmyk[3]))
+        bb = int(255 * (1 - cmyk[2]) * (1 - cmyk[3]))
+        return jsonify(cmyk=cmyk, hex="#%02x%02x%02x" % (rr, gg, bb))
+    except Exception as e:
+        return jsonify(error=f"пипетка не удалась: {e}"), 400
+
+
 @app.route("/api/detail_preview", methods=["POST"])
 def detail_preview():
     """Отрезать вшивную деталь по линии реза (blade) и вернуть её КРОП — чтобы выбрать ширину НА НЕЙ."""
