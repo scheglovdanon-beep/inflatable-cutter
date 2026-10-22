@@ -761,10 +761,11 @@ def main():
 
     def _arc_paths(arcs, panel, gid):
         pp = _prep2(panel); out = [f'<g id="{gid}">']
+        _pcnm = gid[5:] if gid.startswith("seam_") else gid          # деталь-владелец ключа (seam_front_t0 -> front_t0) -> перенос в рулон
         for col, pts in arcs:
             opts = _offset_out(pts, pp, off)
             if seam_keys_cmyk:                                        # ключи рисуем НАТИВНЫМ CMYK на master (не SVG RGB)
-                lay.setdefault("_key_arcs", []).append((opts, col)); continue
+                lay.setdefault("_key_arcs", []).append((opts, col, _pcnm)); continue
             d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in opts)
             out.append(f'<path d="{d}" fill="none" stroke="{col}" stroke-width="{sw_seam}" stroke-linecap="round"/>')
         out.append("</g>")
@@ -832,7 +833,7 @@ def main():
             if abs(dx) > 1e-6 and lay.get("_key_arcs"):              # ключи полосы (собраны для CMYK) сдвинуть на dx, как тело
                 ka = lay["_key_arcs"]
                 for _i in range(_kbefore, len(ka)):
-                    ka[_i] = ([(x + dx, y) for x, y in ka[_i][0]], ka[_i][1])
+                    ka[_i] = ([(x + dx, y) for x, y in ka[_i][0]], ka[_i][1], ka[_i][2])
             if vector_tex:                                            # ВЕКТОР-срез полосы В ТЕЛЕ (-> в рулон): src-зона через ИНВЕРСИЮ tf
                 x0, y0 = tf(src_bbox[0], src_bbox[1]); x1, y1 = tf(src_bbox[2], src_bbox[3])
                 ssx = (x1 - x0) / ((src_bbox[2] - src_bbox[0]) or 1.0); ssy = (y1 - y0) / ((src_bbox[3] - src_bbox[1]) or 1.0)
@@ -950,9 +951,9 @@ def main():
         else:
             le, re = _edges_top_down(list(s["poly"]), s.get("waist") is not None)
         keycol = HEX(_palette(s["i"]))
-        def _emit_key(pts, col):                                       # ключ: CMYK на master (сбор) ИЛИ SVG RGB
+        def _emit_key(pts, col, _nm=f"bokovina_{s['i']}"):             # ключ: CMYK на master (сбор) ИЛИ SVG RGB
             if seam_keys_cmyk:
-                lay.setdefault("_key_arcs", []).append((pts, col)); return
+                lay.setdefault("_key_arcs", []).append((pts, col, _nm)); return
             d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in pts)
             tagged.append(("seamlines", f'<path d="{d}" fill="none" stroke="{col}" stroke-width="{sw_seam}" stroke-linecap="round"/>'))
         if seam_bands:                                                 # ПО ЦВЕТАМ: ключ зоны на под-участке ОБОИХ рёбер
@@ -1161,15 +1162,25 @@ def main():
         ocg = master.add_ocg(name)                                    # слой-группа детали
         mpage.show_pdf_page(mpage.rect, src, 0, oc=ocg)
         src.close()
-    if lay.get("_key_arcs"):                                          # КЛЮЧИ ШВОВ — нативный CMYK (поверх, в кольце припуска)
+    if lay.get("_key_arcs"):                                          # КЛЮЧИ ШВОВ (обшивка) — нативный CMYK (поверх, в кольце припуска)
         kocg = master.add_ocg("kljuchi_cmyk")
-        for (pts, col) in lay["_key_arcs"]:
+        roll_place = lay.get("_roll_place", {})                       # трансформы укладки деталей в рулон
+        def _draw_key(pts, col, tfpt):
             if len(pts) < 2:
-                continue
+                return
             shp = mpage.new_shape()
-            shp.draw_polyline([pymupdf.Point(x * MM2PT, y * MM2PT) for x, y in pts])
+            shp.draw_polyline([pymupdf.Point(*tfpt(x, y)) for x, y in pts])
             shp.finish(color=_hex2cmyk(col), width=sw_seam * MM2PT, closePath=False, lineCap=1, oc=kocg)
             shp.commit()
+        for ka in lay["_key_arcs"]:
+            pts, col = ka[0], ka[1]; nm = ka[2] if len(ka) > 2 else None
+            _draw_key(pts, col, lambda x, y: (x * MM2PT, y * MM2PT))  # 1) на фигуре (верх)
+            rp = roll_place.get(nm) if nm else None                   # 2) в рулоне: та же деталь, трансформ укладки + y_off
+            if rp:
+                (a, b, d, e, xo, yo), yoff = rp
+                def _rtf(x, y, a=a, b=b, d=d, e=e, xo=xo, yo=yo, yoff=yoff):
+                    return ((a * x + b * y + xo) * MM2PT, (d * x + e * y + yo + yoff) * MM2PT)
+                _draw_key(pts, col, _rtf)
     master.save(args.out, garbage=3, deflate=True)
     sz = os.path.getsize(args.out) / 1024
     print(f"saved {args.out} | групп: {len(pieces)} | лист {W:.0f}x{H:.0f} мм | {sz:.0f} KB")
