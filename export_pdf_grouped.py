@@ -258,6 +258,10 @@ def _design_raster(page, src_bbox_pt, tf, contour, cid, zoom=4.0, only_gaps=Fals
         fmask = np.zeros((pix.height, pix.width), np.uint8); cv2.fillPoly(fmask, [cp], 1)
     mm_per_px = (abs(x1 - x0) / pix.width) if pix.width else 1.0       # layout-мм на 1 px растра
     max_gap_px = max(2.0, _GAP_MM / (mm_per_px or 1.0))               # кайма заливки = _GAP_MM мм (не затирать внутр. зоны)
+    if only_gaps and fmask is not None:                               # ОВЕРЛЕЙ: чинить щели ТОЛЬКО кольцом у ВНЕШНЕГО контура
+        r = max(2, int(round(max_gap_px)))                           # (не вокруг букв/внутр. деталей — иначе штрих-гало на тексте)
+        ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+        fmask = cv2.subtract(fmask, cv2.erode(fmask, ker))           # кольцо шириной ~кайма у границы контура
     png = base64.b64encode(_pix_png_nobg(pix, _BG_COLS, fill_mask=fmask, only_gaps=only_gaps, max_gap_px=max_gap_px)).decode()   # фон убрать + зазоры КАЙМОЙ
     cpstr = " ".join(f"{x:.2f},{y:.2f}" for x, y in contour.exterior.coords)
     return (f'<clipPath id="{cid}"><polygon points="{cpstr}"/></clipPath>'
